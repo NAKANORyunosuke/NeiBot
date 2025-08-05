@@ -10,21 +10,5 @@
         {% csrf_token %}
         <button type="submit" name="send_message" value="true">メッセージを送信</button>
     </form>
-
 </body>
-<script>
-    if (location.hash) {
-        const div = document.createElement('div');
-        div.textContent = `トークン情報は ${location.hash} だよ！`;
-
-        // スタイルを追加（任意）
-        div.style.padding = '1em';
-        div.style.marginTop = '2em';
-        div.style.backgroundColor = '#f5f5f5';
-        div.style.border = '1px solid #ccc';
-
-        // HTMLの最後に差し込み
-        document.body.appendChild(div);
-    }
-</script>
 </html>

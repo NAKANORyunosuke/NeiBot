@@ -1,3 +1,4 @@
+import os
 """
 Django settings for NeiBot_panel project.
 
@@ -38,7 +39,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'botcontrol.apps.BotcontrolConfig',
-    'main'
+    'main',
+    'accounts'
 ]
 
 MIDDLEWARE = [
@@ -122,3 +124,13 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# 認証後の遷移先
+LOGIN_REDIRECT_URL = '/'
+LOGOUT_REDIRECT_URL = '/accounts/login/'
+
+# ログインページのURLを指定（@login_requiredで使う）
+LOGIN_URL = '/accounts/login/'
+
+# テンプレートパスの設定
+TEMPLATES[0]['DIRS'] = [os.path.join(BASE_DIR, 'templates')]
