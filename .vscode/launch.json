@@ -1,0 +1,32 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+        "name": "Run Django Server",
+        "type": "debugpy",
+        "request": "launch",
+        "program": "${workspaceFolder}/manage.py",
+        "args": [
+            "runserver",
+            "127.0.0.1:8000"
+        ],
+        "django": true,
+        "envFile": "${workspaceFolder}/venv"
+        },
+        // {
+        // "name": "Run Discord Bot",
+        // "type": "debugpy",
+        // "request": "launch",
+        // "program": "${workspaceFolder}/NeiBot_panel/bot/bot_client.py",
+        // "envFile": "${workspaceFolder}/venv"
+        // }
+    ],
+    "compounds": [
+        {
+        "name": "Start All (Django + Bot)",
+        "configurations": [
+            "Run Django Server",
+        ]
+        }
+    ]
+    }
