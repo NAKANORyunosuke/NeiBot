@@ -125,12 +125,7 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# 認証後の遷移先
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/accounts/login/'
-
-# ログインページのURLを指定（@login_requiredで使う）
-LOGIN_URL = '/accounts/login/'
-
-# テンプレートパスの設定
+LOGIN_REDIRECT_URL = '/accounts/dashboard/'    # ← ログイン後、ダッシュボードへ
+LOGOUT_REDIRECT_URL = '/accounts/login/'       # ← ログアウト後、ログイン画面へ
+LOGIN_URL = '/accounts/login/'                 # ← 未ログイン時のリダイレクト先
 TEMPLATES[0]['DIRS'] = [os.path.join(BASE_DIR, 'templates')]

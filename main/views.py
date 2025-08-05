@@ -1,6 +1,7 @@
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from bot.bot_client import bot, send_message_to_channel
+from django.shortcuts import redirect
 
 
 test_channel_id = 1401953150558277795
@@ -19,3 +20,7 @@ def home(request):
                 print("Botが未起動または準備中")
             return render(request, 'main/home.html', {'message': '送信処理しました'})
     return render(request, 'main/home.html')
+
+
+def redirect_to_login(request):
+    return redirect('login')
