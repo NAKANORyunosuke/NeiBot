@@ -10,7 +10,7 @@ bot_loop = None
 
 
 async def run_discord_bot():
-    with open("venv/token.json", "r", encoding="utf-8") as f:
+    with open("./venv/token.json", "r", encoding="utf-8") as f:
         token = json.load(f)["discord_token"]
     bot.load_extension("bot.cogs.link")
     bot.load_extension("bot.cogs.unlink")
