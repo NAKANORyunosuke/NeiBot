@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 import uvicorn
 import requests
-
+from django.http import HttpResponse
 from bot.utils.twitch import get_twitch_keys, get_user_info_and_subscription, save_linked_user
 
 # Discord Bot の準備
@@ -71,9 +71,9 @@ async def twitch_callback(request: Request):
         user = await bot.fetch_user(int(state))
         if user:
             await user.send(f"✅ Twitch `{twitch_user_name}` とリンクしました！Tier: {tier}, Streak: {streak}")
-    await notify()
-
-    return RedirectResponse(url="https://discord.com")
+    loop = asyncio.get_running_loop()
+    loop.create_task(notify())
+    return HttpResponse("Notified in background")
 
 
 # FastAPIを別スレッドで起動
