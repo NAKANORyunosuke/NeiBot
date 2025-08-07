@@ -27,7 +27,12 @@ SECRET_KEY = 'django-insecure-zqvzwgn65_hg3@o1068s)7fz@&7w%%cqe8wfnqz_(@231+8p$q
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    'neige-subscription.com',
+    '160.251.222.91',
+]
 
 
 # Application definition
