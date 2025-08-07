@@ -18,12 +18,14 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # FastAPI アプリの準備
 app = FastAPI()
 
+
 @app.post("/notify_link")
 async def notify_link(discord_id: int, twitch_name: str, tier: str):
     user = await bot.fetch_user(discord_id)
     if user:
         await user.send(f"✅ Twitch `{twitch_name}` とリンクしました！Tier: {tier}")
     return {"status": "ok"}
+
 
 @app.get("/twitch_callback")
 async def twitch_callback(request: Request):
@@ -73,9 +75,11 @@ async def twitch_callback(request: Request):
 
     return RedirectResponse(url="https://discord.com")
 
+
 # FastAPIを別スレッドで起動
 def start_api():
-    uvicorn.run(app, host="0.0.0.0", port=6000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 # Discord Botを起動
 async def run_discord_bot():

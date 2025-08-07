@@ -69,7 +69,7 @@ def twitch_callback(request):
 
 def notify_discord_bot(discord_id, twitch_name, tier):
     try:
-        res = requests.post("http://localhost:6000/notify_link", json={
+        res = requests.post("http://localhost:8000/notify_link", json={
             "discord_id": discord_id,
             "twitch_name": twitch_name,
             "tier": tier

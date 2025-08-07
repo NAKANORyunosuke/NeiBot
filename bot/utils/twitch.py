@@ -67,44 +67,35 @@ def save_linked_user(discord_id: str, twitch_username: str, is_subscriber: bool,
 # ==================== ユーザー情報取得 ====================
 
 
-def get_user_info_and_subscription(access_token: str):
-    client_id, _, _ = get_twitch_keys()
-
+def get_user_info_and_subscription(access_token, client_id):
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "Client-Id": client_id,
+        "Client-Id": client_id
     }
 
-    # ✅ ユーザー情報取得
-    user_res = requests.get("https://api.twitch.tv/helix/users", headers=headers)
-    user_res.raise_for_status()
-    user_data = user_res.json()["data"][0]
+    # ユーザー情報取得
+    user_info_resp = requests.get("https://api.twitch.tv/helix/users", headers=headers)
+    if user_info_resp.status_code != 200:
+        return None, None, None
+    user_data = user_info_resp.json()["data"][0]
+    user_id = user_data["id"]
+    user_name = user_data["login"]
 
-    twitch_user_id = user_data["id"]
-    twitch_username = user_data["login"]
+    # サブスク情報取得
+    # ↓ここで誰に対するサブスクかを指定する必要がある（配信者のuser_id）
+    # 例: "broadcaster_id" に自分の配信者ID（固定値）を渡す必要あり
+    sub_info_resp = requests.get(
+        f"https://api.twitch.tv/helix/subscriptions/user?user_id={user_id}&broadcaster_id=neigechan",
+        headers=headers
+    )
 
-    # ✅ サブスク情報（配信者IDを指定）
-    broadcaster_id = "YOUR_TWITCH_ID_HERE"  # ← あなたのTwitch IDをここに書く
+    if sub_info_resp.status_code != 200:
+        return user_name, user_id, "unknown"
 
-    sub_url = "https://api.twitch.tv/helix/subscriptions/user"
-    params = {
-        "broadcaster_id": broadcaster_id,
-        "user_id": twitch_user_id
-    }
+    sub_data = sub_info_resp.json().get("data", [])
+    if not sub_data:
+        return user_name, user_id, "not_subscribed"
 
-    sub_res = requests.get(sub_url, headers=headers, params=params)
+    tier = sub_data[0].get("tier", "unknown")
+    return user_name, user_id, tier
 
-    is_subscribed = False
-    streak_months = 0
-
-    if sub_res.status_code == 200:
-        sub_data = sub_res.json().get("data", [])
-        if sub_data:
-            is_subscribed = True
-            streak_months = sub_data[0].get("cumulative_months", 1)
-
-    return {
-        "username": twitch_username,
-        "subscribed": is_subscribed,
-        "streak_months": streak_months
-    }
