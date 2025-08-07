@@ -15,28 +15,19 @@ test_channel_id = 1401953150558277795
 
 @csrf_exempt
 def home(request):
-    if request.method == 'POST':
-        if "send_message" in request.POST:
-            print("送信ボタンが押されました")
-
-            loop = getattr(bot, 'loop', None)
-            if loop and loop.is_running():
-                loop.create_task(send_message_to_channel(test_channel_id, "Webから送信されました"))
-            else:
-                print("Botが未起動または準備中")
-            return render(request, 'main/home.html', {'message': '送信処理しました'})
     return render(request, 'main/home.html')
 
 
 @csrf_exempt
 def twitch_callback(request):
+    print("✅ [twitch_callback] にアクセスがありました")
     code = request.GET.get("code")
-    state = request.GET.get("state")  # DiscordのユーザーIDを受け取る
+    state = request.GET.get("state")  # DiscordのユーザーID（str）
 
     if not code or not state:
         return HttpResponse("Missing code or state", status=400)
 
-    # 1. クレデンシャルを取得
+    # 1. Twitchクレデンシャルを取得
     client_id, client_secret, redirect_uri = get_twitch_keys()
 
     # 2. アクセストークン取得
@@ -58,19 +49,23 @@ def twitch_callback(request):
     token_data = token_res.json()
     access_token = token_data["access_token"]
 
-    # 3. ユーザー情報・サブスク情報を取得
+    # 3. ユーザー情報・サブスク情報取得
     try:
         result = get_user_info_and_subscription(access_token)
+        print("✅ Twitch情報取得成功")  # ← 追加
     except Exception as e:
+        print(f"❌ Twitch情報取得エラー: {str(e)}")
         return HttpResponse(f"Twitchユーザー取得エラー: {str(e)}", status=500)
 
-    # 4. 保存（linked_users.json に書き込む）
+    # 4. 保存
+    print("✅ 保存開始")
     save_linked_user(
         discord_id=state,
         twitch_username=result["username"],
         is_subscriber=result["subscribed"],
         streak=result["streak_months"]
     )
+    print("✅ 保存完了")
 
     return HttpResponse("✅ Twitchとの連携が完了しました。Discordに戻ってください。")
 
