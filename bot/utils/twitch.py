@@ -4,7 +4,7 @@ import os
 import urllib.parse
 import requests
 import asyncio
-
+import datetime
 # ==================== パス設定（絶対パス） ====================
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -50,15 +50,19 @@ def load_linked_users():
 def save_linked_users(data):
     os.makedirs(os.path.dirname(LINKED_USERS_FILE), exist_ok=True)
     with open(LINKED_USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+        json.dump(data, f, indent=4, ensure_ascii=False, default=str)
 
 
 def save_linked_user(discord_id: str, twitch_username: str, is_subscriber: bool, streak: int):
     data = load_linked_users()
+    
+    dt = datetime.date.today()
+    
     data[discord_id] = {
         "twitch_username": twitch_username,
         "is_subscriber": is_subscriber,
-        "streak": streak
+        "streak": streak,
+        "linked_date": dt.isoformat()
     }
     save_linked_users(data)
 
