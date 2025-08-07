@@ -1,3 +1,4 @@
+import sys
 import os
 """
 Django settings for NeiBot_panel project.
@@ -129,3 +130,15 @@ LOGIN_REDIRECT_URL = '/accounts/dashboard/'    # ← ログイン後、ダッシ
 LOGOUT_REDIRECT_URL = '/accounts/login/'       # ← ログアウト後、ログイン画面へ
 LOGIN_URL = '/accounts/login/'                 # ← 未ログイン時のリダイレクト先
 TEMPLATES[0]['DIRS'] = [os.path.join(BASE_DIR, 'templates')]
+
+if hasattr(sys, '_MEIPASS'):
+    BASE_DIR = sys._MEIPASS
+else:
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+TEMPLATES[0]['DIRS'] = [
+    os.path.join(BASE_DIR, 'accounts', 'templates'),
+    os.path.join(BASE_DIR, 'main', 'templates'),
+]
+
+STATICFILES_DIRS = []

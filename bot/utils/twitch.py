@@ -1,9 +1,7 @@
-from twitchAPI.twitch import Twitch
 import json
 import os
 import urllib.parse
 import requests
-import asyncio
 import datetime
 # ==================== パス設定（絶対パス） ====================
 
@@ -55,9 +53,9 @@ def save_linked_users(data):
 
 def save_linked_user(discord_id: str, twitch_username: str, is_subscriber: bool, streak: int):
     data = load_linked_users()
-    
+
     dt = datetime.date.today()
-    
+
     data[discord_id] = {
         "twitch_username": twitch_username,
         "is_subscriber": is_subscriber,
