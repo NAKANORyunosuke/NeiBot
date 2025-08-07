@@ -1,8 +1,8 @@
 from django.urls import path
-from .views import redirect_to_login
 from .views import home
+from . import views
 
 urlpatterns = [
-    path('', redirect_to_login, name='login'),
     path('', home, name='home'),
+    path("twitch/callback/", views.twitch_callback, name="twitch_callback"),
 ]

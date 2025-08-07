@@ -20,7 +20,6 @@ from django.contrib.auth.views import LoginView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', LoginView.as_view(template_name='accounts/login.html'), name='root-login'),  # ← 追加
     path('accounts/', include('accounts.urls')),
     path('', include('main.urls')),
 ]
