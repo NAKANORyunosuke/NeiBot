@@ -90,15 +90,14 @@ def get_user_info_and_subscription(access_token, client_id):
     )
 
     if sub_info_resp.status_code != 200:
-        return user_name, user_id, "unknown"
+        return user_name, user_id, "unknown", "unknown"
 
     save_linked_users(sub_info_resp.json())
 
     sub_data = sub_info_resp.json().get("data", [])
     if not sub_data:
-        return user_name, user_id, "not_subscribed"
+        return user_name, user_id, "not_subscribed", "unknown"
 
     tier = sub_data[0].get("tier", "unknown")
-
     streak = sub_data[0].get("streak", "unknown")
     return user_name, user_id, tier, streak
