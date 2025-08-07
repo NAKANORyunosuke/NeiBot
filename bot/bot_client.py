@@ -59,18 +59,18 @@ async def twitch_callback(request: Request):
         return {"error": "Access token not found"}
 
     # 3. ユーザー情報とサブスク情報を取得
-    twitch_user_name, twitch_user_id, tier = get_user_info_and_subscription(access_token, client_id)
+    twitch_user_name, twitch_user_id, tier, streak = get_user_info_and_subscription(access_token, client_id)
     if not twitch_user_name:
         return {"error": "Failed to get Twitch user info"}
 
     # 4. ユーザー情報を保存
-    save_linked_user(state, twitch_user_name, tier)
+    save_linked_user(state, twitch_user_name, tier, streak)
 
     # 5. Discordに通知（非同期に実行）
     async def notify():
         user = await bot.fetch_user(int(state))
         if user:
-            await user.send(f"✅ Twitch `{twitch_user_name}` とリンクしました！Tier: {tier}")
+            await user.send(f"✅ Twitch `{twitch_user_name}` とリンクしました！Tier: {tier}, Streak: {streak}")
     asyncio.create_task(notify())
 
     return RedirectResponse(url="https://discord.com")

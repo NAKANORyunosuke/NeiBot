@@ -97,5 +97,6 @@ def get_user_info_and_subscription(access_token, client_id):
         return user_name, user_id, "not_subscribed"
 
     tier = sub_data[0].get("tier", "unknown")
-    return user_name, user_id, tier
 
+    streak = sub_data[0].get("streak", "unknown")
+    return user_name, user_id, tier, streak
