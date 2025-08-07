@@ -76,7 +76,7 @@ def get_user_info_and_subscription(access_token, client_id):
     # ユーザー情報取得
     user_info_resp = requests.get("https://api.twitch.tv/helix/users", headers=headers)
     if user_info_resp.status_code != 200:
-        return None, None, None
+        return None, None, None, None
     user_data = user_info_resp.json()["data"][0]
     user_id = user_data["id"]
     user_name = user_data["login"]
