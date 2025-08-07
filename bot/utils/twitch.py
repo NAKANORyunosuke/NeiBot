@@ -5,7 +5,7 @@ import requests
 import datetime
 # ==================== パス設定（絶対パス） ====================
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "./"))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
 TOKEN_PATH = os.path.join(PROJECT_ROOT, "venv", "token.json")
 LINKED_USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "linked_users.json")
 
