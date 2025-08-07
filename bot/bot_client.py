@@ -71,7 +71,7 @@ async def twitch_callback(request: Request):
         user = await bot.fetch_user(int(state))
         if user:
             await user.send(f"✅ Twitch `{twitch_user_name}` とリンクしました！Tier: {tier}, Streak: {streak}")
-    asyncio.create_task(notify())
+    await notify()
 
     return RedirectResponse(url="https://discord.com")
 
