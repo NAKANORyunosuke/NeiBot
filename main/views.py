@@ -7,10 +7,7 @@ from twitchAPI.twitch import Twitch
 import requests
 from django.http import HttpResponse
 from twitchAPI.twitch import Twitch
-from bot.utils.twitch import get_twitch_keys, save_linked_user
 from bot.utils.twitch import get_user_info_and_subscription, save_linked_user
-
-test_channel_id = 1401953150558277795
 
 
 @csrf_exempt
@@ -68,6 +65,18 @@ def twitch_callback(request):
     print("✅ 保存完了")
 
     return HttpResponse("✅ Twitchとの連携が完了しました。Discordに戻ってください。")
+
+
+def notify_discord_bot(discord_id, twitch_name, tier):
+    try:
+        res = requests.post("http://localhost:6000/notify_link", json={
+            "discord_id": discord_id,
+            "twitch_name": twitch_name,
+            "tier": tier
+        })
+        res.raise_for_status()
+    except Exception as e:
+        print(f"❌ Discord Bot 通知エラー: {e}")
 
 
 def redirect_to_login(request):

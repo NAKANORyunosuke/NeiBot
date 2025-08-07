@@ -1,14 +1,62 @@
 import discord
 from discord.ext import commands
-import json
+from fastapi import FastAPI
+import uvicorn
+import threading
 import asyncio
+import json
 
+# ① Botの初期化
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-bot_loop = None
+# ② APIサーバ用FastAPIインスタンス
+app = FastAPI()
 
 
+# ③ チャンネルにメッセージを送る関数（Django側からも使えるように）
+async def send_message_to_channel(channel_id: int, message: str):
+    channel = bot.get_channel(channel_id)
+    if channel:
+        await channel.send(message)
+    else:
+        print(f"❌ チャンネルが見つかりません: {channel_id}")
+
+
+# ④ Bot起動イベント
+@bot.event
+async def on_ready():
+    print(f"✅ {bot.user} が起動しました。")
+
+
+# ⑤ メッセージエコー機能（例）
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    await message.channel.send(message.content)
+
+
+# ⑥ FastAPIのエンドポイント（外部から通知を受ける）
+@app.post("/notify_link")
+async def notify_link(discord_id: int, twitch_name: str, tier: str):
+    try:
+        user = await bot.fetch_user(discord_id)
+        if user:
+            await user.send(f"✅ Twitch `{twitch_name}` とリンクしました！Tier: {tier}")
+            return {"status": "ok"}
+        else:
+            return {"status": "user_not_found"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
+# ⑦ FastAPIのスレッド起動
+def start_api():
+    uvicorn.run(app, host="0.0.0.0", port=6000)
+
+
+# ⑧ Bot起動関数（メイン）
 async def run_discord_bot():
     with open("./venv/token.json", "r", encoding="utf-8") as f:
         token = json.load(f)["discord_token"]
@@ -17,51 +65,7 @@ async def run_discord_bot():
     await bot.start(token)
 
 
-async def send_message_to_channel(channel_id: int, message: str):
-    channel = bot.get_channel(channel_id)
-    if channel:
-        await channel.send(message)
-    else:
-        print("チャンネルが見つかりません")
-
-
-@bot.event
-async def on_ready():
-    global bot_loop
-    bot_loop = asyncio.get_running_loop()
-    print(f"{bot.user} が起動しました。")
-
-
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-    await message.channel.send(message.content)
-
-
-# 今後の参考用: メンバー参加時にTwitch Tierを確認してロール付与
-# @bot.event
-# async def on_member_join(member: discord.Member):
-#     twitch_user_id = linked_accounts.get(member.id)
-#     if not twitch_user_id:
-#         print(f"{member.name} はTwitch連携されていません")
-#         return
-
-#     broadcaster_id = "<あなたのTwitchユーザーID>"
-#     tier = get_twitch_tier(twitch_user_id, broadcaster_id)
-#     if not tier:
-#         print(f"{member.name} のTier情報を取得できませんでした")
-#         return
-
-#     role_map = {
-#         "1000": "Tier1",
-#         "2000": "Tier2",
-#         "3000": "Tier3"
-#     }
-
-#     role_name = role_map.get(tier)
-#     if role_name:
-#         role = discord.utils.get(member.guild.roles, name=role_name)
-#         if role:
-#             await member.add_roles(role)
-#             print(f"{member.name} にロール {role_name} を付与しました")
+# ⑨ メイン：APIとBotを同時起動
+if __name__ == "__main__":
+    threading.Thread(target=start_api, daemon=True).start()
+    asyncio.run(run_discord_bot())
