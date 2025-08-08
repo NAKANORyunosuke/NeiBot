@@ -1,7 +1,11 @@
-from discord.ext import commands
-import discord
+from __future__ import annotations
 import asyncio
+from typing import Optional
+
+import discord
+from discord.ext import commands, tasks
 from bot.utils.twitch import get_auth_url, load_linked_users
+
 
 TIER_ROLE_MAP = {
     "1000": "Subscription Tier1",
