@@ -28,7 +28,7 @@ class LinkCog(commands.Cog):
                 twitch_name = info.get("twitch_username", "不明")
                 is_sub = info.get("is_subscriber", False)
                 # streak = info.get("streak", 0)
-                tier = info.get("is_subscriber", 0)
+                tier = info.get("tier", 0)
                 tier_msg = "0"
                 if tier:
                     if tier == "1000":
