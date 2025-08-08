@@ -58,18 +58,19 @@ def save_linked_users(data):
         json.dump(data, f, indent=4, ensure_ascii=False, default=str)
 
 
-def save_linked_user(discord_id: str, twitch_username: str, is_subscriber: bool, streak: int):
+def save_linked_user(discord_id: str, twitch_username: str, tier: str | None, streak: int):
     data = load_linked_users()
-
     dt = datetime.date.today()
 
     data[discord_id] = {
         "twitch_username": twitch_username,
-        "is_subscriber": is_subscriber,
+        "tier": tier,  # ← ここでTierを保存
+        "is_subscriber": tier is not None,  # ← boolにもしておく
         "streak": streak,
         "linked_date": dt.isoformat()
     }
     save_linked_users(data)
+
 
 # ==================== ユーザー情報取得 ====================
 
