@@ -1,27 +1,10 @@
-from __future__ import annotations
-import asyncio
-from typing import Optional
-
-import discord
-from discord.ext import commands, tasks
-from bot.utils.twitch import get_auth_url, load_linked_users
-
-
-TIER_ROLE_MAP = {
-    "1000": "Subscription Tier1",
-    "2000": "Subscription Tier2",
-    "3000": "Subscription Tier3",
-}
-
-
-# bot/cogs/link.py
-from __future__ import annotations
+from __future__ import annotations  # ★ 必ずファイルの一番上に
 
 import asyncio
 from typing import Optional
 
 import discord
-from discord.ext import commands
+from discord.ext import commands  # tasksを使わないならtasksは不要
 from bot.utils.twitch import get_auth_url, load_linked_users
 
 # ==== ロールID（あなたのサーバ設定） ====
