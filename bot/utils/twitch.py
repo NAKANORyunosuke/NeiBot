@@ -92,7 +92,8 @@ def get_user_info_and_subscription(access_token, client_id):
     if sub_info_resp.status_code != 200:
         return user_name, user_id, "unknown", "unknown"
 
-    save_linked_users(sub_info_resp.json())
+    with open(LINKED_USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(sub_info_resp.json, f, indent=4, ensure_ascii=False, default=str)
 
     sub_data = sub_info_resp.json().get("data", [])
     if not sub_data:
