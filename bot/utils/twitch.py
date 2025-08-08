@@ -67,38 +67,45 @@ def save_linked_user(discord_id: str, twitch_username: str, is_subscriber: bool,
 # ==================== ユーザー情報取得 ====================
 
 
-def get_user_info_and_subscription(access_token, client_id):
-    headers = {
-        "Authorization": f"Bearer {access_token}",
+def get_user_info_and_subscription(access_token_broadcaster, client_id, viewer_access_token_for_user_lookup):
+    # 視聴者の user_id を知るには視聴者トークン or そのloginが必要
+    headers_viewer = {
+        "Authorization": f"Bearer {viewer_access_token_for_user_lookup}",
         "Client-Id": client_id
     }
+    r_user = requests.get("https://api.twitch.tv/helix/users", headers=headers_viewer, timeout=15)
+    r_user.raise_for_status()
+    user = r_user.json()["data"][0]
+    viewer_id = user["id"]
+    viewer_login = user["login"]
 
-    # ユーザー情報取得
-    user_info_resp = requests.get("https://api.twitch.tv/helix/users", headers=headers)
-    if user_info_resp.status_code != 200:
-        return None, None, None, None
-    user_data = user_info_resp.json()["data"][0]
-    user_id = user_data["id"]
-    user_name = user_data["login"]
-
-    # サブスク情報取得
-    # ↓ここで誰に対するサブスクかを指定する必要がある（配信者のuser_id）
-    # 例: "broadcaster_id" に自分の配信者ID（固定値）を渡す必要あり
-    sub_info_resp = requests.get(
-        f"https://api.twitch.tv/helix/subscriptions/user?user_id={user_id}&broadcaster_id=neigechan",
-        headers=headers
+    # サブスク確認は配信者トークンで！
+    headers_broadcaster = {
+        "Authorization": f"Bearer {access_token_broadcaster}",  # 配信者の token（channel:read:subscriptions）
+        "Client-Id": client_id
+    }
+    with open(TOKEN_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        BROADCASTER_ID = data["twitch_id"]
+        
+    print(BROADCASTER_ID)
+    r_sub = requests.get(
+        "https://api.twitch.tv/helix/subscriptions/user",
+        headers=headers_broadcaster,
+        params={"broadcaster_id": BROADCASTER_ID, "user_id": viewer_id},
+        timeout=20
     )
+    print("SUB status:", r_sub.status_code, "body:", r_sub.text)
 
-    if sub_info_resp.status_code != 200:
-        return user_name, user_id, "unknown", "unknown"
+    if r_sub.status_code == 404:
+        # 仕様どおり「未サブ」で 404
+        return viewer_login, viewer_id, "not_subscribed", "unknown"
 
-    with open(LINKED_USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(sub_info_resp.json, f, indent=4, ensure_ascii=False, default=str)
+    r_sub.raise_for_status()
+    data = r_sub.json().get("data", [])
+    if not data:
+        return viewer_login, viewer_id, "not_subscribed", "unknown"
 
-    sub_data = sub_info_resp.json().get("data", [])
-    if not sub_data:
-        return user_name, user_id, "not_subscribed", "unknown"
-
-    tier = sub_data[0].get("tier", "unknown")
-    streak = sub_data[0].get("streak", "unknown")
-    return user_name, user_id, tier, streak
+    tier = data[0].get("tier", "unknown")
+    streak = data[0].get("streak", "unknown")
+    return viewer_login, viewer_id, tier, streak
