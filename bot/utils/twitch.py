@@ -3,6 +3,8 @@ import os
 import urllib.parse
 import requests
 import datetime
+import httpx
+
 # ==================== パス設定（絶対パス） ====================
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
@@ -73,25 +75,30 @@ def save_linked_user(discord_id: str, twitch_username: str, is_subscriber: bool,
 
 
 async def get_user_info_and_subscription(viewer_access_token: str, client_id: str, broadcaster_id: str):
-    """視聴者トークン+scope user:read:subscriptions でサブスク状態を確認"""
     headers = {
         "Authorization": f"Bearer {viewer_access_token}",
         "Client-Id": client_id,
     }
     async with httpx.AsyncClient(timeout=10) as client:
-        # 視聴者のユーザー情報
+        # 1) /users
         r = await client.get("https://api.twitch.tv/helix/users", headers=headers)
+        print("[DEBUG] /users status:", r.status_code)
+        try:
+            print("[DEBUG] /users body:", r.text)
+        except Exception:
+            pass
         r.raise_for_status()
         me = r.json()["data"][0]
         user_id = me["id"]
         user_login = me["login"]
 
-        # Check User Subscription
+        # 2) /subscriptions/user
         params = {"broadcaster_id": broadcaster_id, "user_id": user_id}
-        r2 = await client.get("https://api.twitch.tv/helix/subscriptions/user",
-                                headers=headers, params=params)
+        r2 = await client.get("https://api.twitch.tv/helix/subscriptions/user", headers=headers, params=params)
+        print("[DEBUG] /subscriptions/user status:", r2.status_code)
+        print("[DEBUG] /subscriptions/user body:", r2.text)
+
         if r2.status_code == 404:
-            # 未サブ
             return user_login, user_id, None, None
 
         r2.raise_for_status()
@@ -100,7 +107,7 @@ async def get_user_info_and_subscription(viewer_access_token: str, client_id: st
             return user_login, user_id, None, None
 
         sub = data[0]
-        tier = sub.get("tier")  # "1000"/"2000"/"3000"
-        # cumulative_months or streak が実装側によって変わる事がある
+        tier = sub.get("tier")
         streak = sub.get("cumulative_months", sub.get("streak"))
         return user_login, user_id, tier, streak
+
