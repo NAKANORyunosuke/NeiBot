@@ -7,7 +7,7 @@ import datetime
 from bot.utils.twitch import load_linked_users, save_linked_users, get_auth_url
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 import uvicorn
