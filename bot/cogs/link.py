@@ -28,14 +28,14 @@ class LinkCog(commands.Cog):
                 twitch_name = info.get("twitch_username", "不明")
                 is_sub = info.get("is_subscriber", False)
                 # streak = info.get("streak", 0)
-                tier = info.get("tier", 0)
+                tier = info.get("is_subscriber", 0)
 
                 msg = (
                     f"✅ Twitch連携が完了しました！\n"
                     f"・Twitch名: **{twitch_name}**\n"
                     f"・サブスク状態: {'✅ 登録中' if is_sub else '❌ 未登録'}\n"
                     # f"・継続月数: {streak} ヶ月"
-                    f"・Tier: {tier}"
+                    f"・Tier: {int(tier/1000.0)}"
                 )
                 await ctx.author.send(msg)
                 return
