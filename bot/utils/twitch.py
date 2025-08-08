@@ -74,6 +74,7 @@ def get_user_info_and_subscription(access_token_broadcaster, client_id, viewer_a
         "Client-Id": client_id
     }
     r_user = requests.get("https://api.twitch.tv/helix/users", headers=headers_viewer, timeout=15)
+    print(r_user)
     r_user.raise_for_status()
     user = r_user.json()["data"][0]
     viewer_id = user["id"]
