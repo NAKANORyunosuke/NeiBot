@@ -1,14 +1,22 @@
+# bot_client.py 置き換えパッチ
 import asyncio
 import json
 import threading
+from typing import Coroutine, Any  # ★ 追加
 
 import discord
 from discord.ext import commands
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 import uvicorn
-import requests
-from bot.utils.twitch import get_twitch_keys, get_user_info_and_subscription, save_linked_user
+import httpx  # ★ requests → httpx に置換
+# import requests  # ★ もう使わない
+from bot.utils.twitch import (
+    get_twitch_keys,
+    get_user_info_and_subscription,
+    save_linked_user,
+    get_broadcast_id,
+)
 
 # ===== Discord Bot の準備 =====
 intents = discord.Intents.all()
@@ -19,14 +27,13 @@ app = FastAPI()
 
 
 # ---- Bot ループにコルーチンを投げる小ヘルパ ----
-def run_in_bot_loop(coro: asyncio.coroutines):
+def run_in_bot_loop(coro: Coroutine[Any, Any, Any]):
     """Discord Bot のイベントループで coro を実行して、例外をログに出す"""
     fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
     def _done(f):
         try:
             f.result()
         except Exception as e:
-            # ここで例外内容が見える
             print("❌ notify error:", repr(e))
     fut.add_done_callback(_done)
     return fut
@@ -34,7 +41,6 @@ def run_in_bot_loop(coro: asyncio.coroutines):
 
 # ---- Bot側で実際に送信する処理（Botのループ上で動く）----
 async def notify_discord_user(discord_id: int, twitch_name: str, tier: str, streak: int | None = None):
-    # Bot がログイン完了するのを待つ（重要）
     await bot.wait_until_ready()
     user = await bot.fetch_user(discord_id)
     if not user:
@@ -66,7 +72,7 @@ async def twitch_callback(request: Request):
     # 1) Twitch クレデンシャル
     client_id, client_secret, redirect_uri = get_twitch_keys()
 
-    # 2) アクセストークン取得
+    # 2) アクセストークン取得（★ 非同期 httpx に置換）
     token_url = "https://id.twitch.tv/oauth2/token"
     payload = {
         "client_id": client_id,
@@ -77,7 +83,9 @@ async def twitch_callback(request: Request):
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-    resp = requests.post(token_url, data=payload, headers=headers, timeout=20)
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(token_url, data=payload, headers=headers)
+
     if resp.status_code != 200:
         return PlainTextResponse(f"Failed to get token: {resp.text}", status_code=502)
 
@@ -85,15 +93,23 @@ async def twitch_callback(request: Request):
     if not access_token:
         return PlainTextResponse("Access token not found", status_code=502)
 
-    # 3) ユーザー情報 & サブスク情報
-    twitch_user_name, twitch_user_id, tier, streak = get_user_info_and_subscription(access_token, client_id)
+    # 3) broadcaster_id を解決（★ await が必要）
+    BROADCASTER_ID = await get_broadcast_id()
+
+    # 4) ユーザー情報 & サブスク情報（★ await）
+    twitch_user_name, twitch_user_id, tier, streak = await get_user_info_and_subscription(
+        viewer_access_token=access_token,
+        client_id=client_id,
+        broadcaster_id=BROADCASTER_ID,
+    )
+
     if not twitch_user_name:
         return PlainTextResponse("Failed to get Twitch user info", status_code=502)
 
-    # 4) リンク情報を保存
+    # 5) リンク情報を保存（同期I/OでもOK。重い場合は to_thread 化）
     save_linked_user(state, twitch_user_name, tier, streak)
 
-    # 5) Discord通知は Bot ループへ投げる（ここが肝）
+    # 6) Discord通知は Bot ループへ投げる
     try:
         print("notify_discord_userの呼び出し")
         run_in_bot_loop(
@@ -102,7 +118,6 @@ async def twitch_callback(request: Request):
     except Exception as e:
         print("❌ failed to schedule notify:", repr(e))
 
-    # すぐ返してOK（バックグラウンド実行）
     return PlainTextResponse("Notified in background", status_code=200)
 
 
@@ -116,7 +131,6 @@ async def run_discord_bot():
     with open("./venv/token.json", "r", encoding="utf-8") as f:
         token = json.load(f)["discord_token"]
 
-    # 必要な Cog をロード
     bot.load_extension("bot.cogs.link")
     bot.load_extension("bot.cogs.unlink")
 

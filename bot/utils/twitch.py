@@ -17,6 +17,11 @@ def get_twitch_keys():
         data = json.load(f)
     return data["twitch_client_id"], data["twitch_seqret_key"], data["twitch_redirect_uri"]
 
+
+def get_broadcast_id():
+    with open(TOKEN_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data["twitch_id"]
 # ==================== OAuth URL生成 ====================
 
 
@@ -67,46 +72,35 @@ def save_linked_user(discord_id: str, twitch_username: str, is_subscriber: bool,
 # ==================== ユーザー情報取得 ====================
 
 
-def get_user_info_and_subscription(access_token_broadcaster, client_id, viewer_access_token_for_user_lookup):
-    # 視聴者の user_id を知るには視聴者トークン or そのloginが必要
-    headers_viewer = {
-        "Authorization": f"Bearer {viewer_access_token_for_user_lookup}",
-        "Client-Id": client_id
+async def get_user_info_and_subscription(viewer_access_token: str, client_id: str, broadcaster_id: str):
+    """視聴者トークン+scope user:read:subscriptions でサブスク状態を確認"""
+    headers = {
+        "Authorization": f"Bearer {viewer_access_token}",
+        "Client-Id": client_id,
     }
-    r_user = requests.get("https://api.twitch.tv/helix/users", headers=headers_viewer, timeout=15)
-    print(r_user)
-    r_user.raise_for_status()
-    user = r_user.json()["data"][0]
-    viewer_id = user["id"]
-    viewer_login = user["login"]
+    async with httpx.AsyncClient(timeout=10) as client:
+        # 視聴者のユーザー情報
+        r = await client.get("https://api.twitch.tv/helix/users", headers=headers)
+        r.raise_for_status()
+        me = r.json()["data"][0]
+        user_id = me["id"]
+        user_login = me["login"]
 
-    # サブスク確認は配信者トークンで！
-    headers_broadcaster = {
-        "Authorization": f"Bearer {access_token_broadcaster}",  # 配信者の token（channel:read:subscriptions）
-        "Client-Id": client_id
-    }
-    with open(TOKEN_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-        BROADCASTER_ID = data["twitch_id"]
-        
-    print(BROADCASTER_ID)
-    r_sub = requests.get(
-        "https://api.twitch.tv/helix/subscriptions/user",
-        headers=headers_broadcaster,
-        params={"broadcaster_id": BROADCASTER_ID, "user_id": viewer_id},
-        timeout=20
-    )
-    print("SUB status:", r_sub.status_code, "body:", r_sub.text)
+        # Check User Subscription
+        params = {"broadcaster_id": broadcaster_id, "user_id": user_id}
+        r2 = await client.get("https://api.twitch.tv/helix/subscriptions/user",
+                                headers=headers, params=params)
+        if r2.status_code == 404:
+            # 未サブ
+            return user_login, user_id, None, None
 
-    if r_sub.status_code == 404:
-        # 仕様どおり「未サブ」で 404
-        return viewer_login, viewer_id, "not_subscribed", "unknown"
+        r2.raise_for_status()
+        data = r2.json().get("data", [])
+        if not data:
+            return user_login, user_id, None, None
 
-    r_sub.raise_for_status()
-    data = r_sub.json().get("data", [])
-    if not data:
-        return viewer_login, viewer_id, "not_subscribed", "unknown"
-
-    tier = data[0].get("tier", "unknown")
-    streak = data[0].get("streak", "unknown")
-    return viewer_login, viewer_id, tier, streak
+        sub = data[0]
+        tier = sub.get("tier")  # "1000"/"2000"/"3000"
+        # cumulative_months or streak が実装側によって変わる事がある
+        streak = sub.get("cumulative_months", sub.get("streak"))
+        return user_login, user_id, tier, streak
