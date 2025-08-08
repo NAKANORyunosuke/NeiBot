@@ -94,7 +94,9 @@ async def twitch_callback(request: Request):
         return PlainTextResponse("Access token not found", status_code=502)
 
     # 3) broadcaster_id を解決（★ await が必要）
-    BROADCASTER_ID = await get_broadcast_id()
+    val = get_broadcast_id()
+    print(f"[DEBUG] get_broadcast_id -> {val!r} ({type(val)})")
+    BROADCASTER_ID = str(get_broadcast_id())
 
     # 4) ユーザー情報 & サブスク情報（★ await）
     twitch_user_name, twitch_user_id, tier, streak = await get_user_info_and_subscription(
