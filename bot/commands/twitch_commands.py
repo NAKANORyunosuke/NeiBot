@@ -4,7 +4,7 @@ from discord.ext import commands
 import json
 import os
 
-LINKED_USERS_FILE = "data/linked_users.json"
+LINKED_USERS_FILE = "venv/linked_users.json"
 
 
 # JSONを読み込む
