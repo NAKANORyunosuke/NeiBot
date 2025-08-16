@@ -1,0 +1,5 @@
+{% block content %}
+    <h2>ようこそ、{{ user.username }} さん！</h2>
+    <p>これはダッシュボード画面です。</p>
+    <a href="{% url 'home' %}">ホームに戻る</a>
+{% endblock %}

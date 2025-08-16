@@ -2,31 +2,18 @@
     "version": "0.2.0",
     "configurations": [
         {
-        "name": "Run Django Server",
-        "type": "debugpy",
-        "request": "launch",
-        "program": "${workspaceFolder}/manage.py",
-        "args": [
-            "runserver",
-            "127.0.0.1:8000"
-        ],
-        "django": true,
-        "envFile": "${workspaceFolder}/venv"
-        },
-        // {
-        // "name": "Run Discord Bot",
-        // "type": "debugpy",
-        // "request": "launch",
-        // "program": "${workspaceFolder}/NeiBot_panel/bot/bot_client.py",
-        // "envFile": "${workspaceFolder}/venv"
-        // }
-    ],
-    "compounds": [
-        {
-        "name": "Start All (Django + Bot)",
-        "configurations": [
-            "Run Django Server",
-        ]
+            "name": "Debug: bot.bot_client (module)",
+            "type": "python",
+            "request": "launch",
+            "module": "bot.bot_client",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "envFile": "${workspaceFolder}/venv",
+            "env": {
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONASYNCIODEBUG": "1"   // asyncio の詳細ログ（必要なければ削除可）
+            }
         }
     ]
-    }
+}

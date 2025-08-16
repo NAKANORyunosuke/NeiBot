@@ -5,7 +5,9 @@ from typing import Optional
 
 import discord
 from discord.ext import commands  # tasksを使わないならtasksは不要
-from bot.utils.twitch import get_auth_url, load_linked_users
+from bot.utils.twitch import get_auth_url, load_linked_users, save_linked_users
+from bot.monthly_relink_bot import mark_resolved
+import os
 
 # ==== ロールID（あなたのサーバ設定） ====
 ROLE_TWITCH_LINKED = 1403053988991205509  # Twitch-linked
@@ -19,6 +21,9 @@ TIER_ROLE_MAP = {
     "3000": ROLE_TIER3,
 }
 ALL_TIER_ROLE_IDS = {ROLE_TIER1, ROLE_TIER2, ROLE_TIER3}
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+TOKEN_PATH = os.path.join(PROJECT_ROOT, "venv", "token.json")
+LINKED_USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "linked_users.json")
 
 
 class LinkCog(commands.Cog):
@@ -84,6 +89,7 @@ class LinkCog(commands.Cog):
                 member = None
 
             if member is not None:
+                mark_resolved(discord_id)
                 try:
                     await self._ensure_roles_for_member(member, tier)
                 except discord.Forbidden:
@@ -107,7 +113,19 @@ class LinkCog(commands.Cog):
                 f"・Tier: {tier_msg}\n"
                 "※ ロールが反映されていない場合は、数秒待ってから再度ご確認ください。"
             )
-            await ctx.author.send(msg)
+            data = load_linked_users()
+            try:
+                data[discord_id]['dm_failed'] = True
+                await ctx.author.send(msg)
+            except discord.Forbidden:
+                data[discord_id]['dm_failed'] = False
+                data[discord_id]['dm_failed_reason'] = "DM拒否 (Forbidden)"
+                return
+            except discord.HTTPException as e:
+                data[discord_id]['dm_failed'] = False
+                data[discord_id]['dm_failed_reason'] = f"HTTPエラー: {e}"
+            finally:
+                save_linked_users(data)
             return
 
         # タイムアウト

@@ -3,20 +3,18 @@ import json
 import threading
 from typing import Coroutine, Any
 import zoneinfo
-import datetime
-from bot.utils.twitch import load_linked_users, save_linked_users, get_auth_url
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 import uvicorn
 import httpx
 import os
+from bot.common import save_all_guild_members
 from bot.utils.streak import reconcile_and_save_link
 from bot.utils.twitch import (
     get_twitch_keys,
     get_user_info_and_subscription,
-    save_linked_user,
     get_broadcast_id,
 )
 
@@ -179,95 +177,6 @@ async def twitch_callback(request: Request):
     return PlainTextResponse("Notified in background", status_code=200)
 
 
-
-@tasks.loop(time=datetime.time(hour=0, minute=5, tzinfo=JST))
-async def monthly_relink_sweeper():
-    """毎日0:05(JST)に起動。月初1日のみ、再リンクフラグ付け＆DM通知を行う。"""
-    await bot.wait_until_ready()
-    today = datetime.datetime.now(JST).date()
-    if today.day != 1:
-        return  # 月初のみ
-
-    # --- 多重実行防止（同月2回目はスキップ） ---
-    meta_path = os.path.join(PROJECT_ROOT, "venv", "linked_users_meta.json")
-    last_tag = f"{today.year:04d}{today.month:02d}"
-    meta = {}
-    if os.path.exists(meta_path):
-        try:
-            meta = json.load(open(meta_path, "r", encoding="utf-8"))
-        except Exception:
-            meta = {}
-    if meta.get("last_relink_run") == last_tag:
-        print("ℹ すでに今月の再リンク処理は完了しています。スキップ")
-        return
-
-    data = load_linked_users()
-    if not data:
-        print("ℹ linked_users.json が空/未作成: スキップ")
-        # メタだけ更新
-        meta["last_relink_run"] = last_tag
-        json.dump(meta, open(meta_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-        return
-
-    targets = []
-    for discord_id, info in data.items():
-        if info.get("is_subscriber") is True:
-            # すでにフラグが立っている人は二重に立てない
-            if not info.get("relink_required"):
-                # 前回スナップショットを保存（最小限でOK）
-                info["prev_snapshot"] = {
-                    "linked_date": info.get("linked_date"),
-                    "streak_months": int(info.get("streak_months", 0) or 0),
-                    "cumulative_months": int(info.get("cumulative_months", 0) or 0),
-                    "tier": info.get("tier"),
-                    "is_subscriber": bool(info.get("is_subscriber", False)),
-                }
-                info["relink_required"] = True
-                data[discord_id] = info
-                targets.append(discord_id)
-
-    if not targets:
-        print("ℹ 月初の再リンク対象なし（全員非サブ or 既にフラグ済み）")
-        # メタ更新
-        meta["last_relink_run"] = last_tag
-        json.dump(meta, open(meta_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-        return
-
-    # 先に保存（クラッシュしてもフラグは残る）
-    save_linked_users(data)
-    print(f"🧹 月初再リンク: {len(targets)} 件にフラグ付与しました（prev_snapshot保持）")
-
-    # DM送信
-    for did in targets:
-        try:
-            user = await bot.fetch_user(int(did))
-            auth_url = get_auth_url(str(did))  # state=discord_id
-            msg = (
-                "📅 毎月初めの再認証のお願い\n"
-                "サブスク状況の確認のため、もう一度リンクをお願いします。\n"
-                f"{auth_url}\n\n"
-                "※ リンク後は自動でロールが同期されます。"
-            )
-            await user.send(msg)
-            await asyncio.sleep(0.5)  # 送信間隔（必要なら増やす）
-        except discord.Forbidden:
-            print(f"❌ DM拒否/フレ申請必須のため送れず: {did}")
-        except discord.NotFound:
-            print(f"❌ ユーザーが見つからない: {did}")
-        except Exception as e:
-            print(f"❌ DM送信失敗 {did}: {e!r}")
-
-    # メタ更新（“フラグ付けとDM試行”が終わったことを記録）
-    meta["last_relink_run"] = last_tag
-    json.dump(meta, open(meta_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-
-
-@monthly_relink_sweeper.before_loop
-async def _before_monthly_relink_sweeper():
-    await bot.wait_until_ready()
-    print("⏰ monthly_relink_sweeper scheduled (JST 00:05)")
-
-
 # ===== FastAPI を別スレッドで起動 =====
 def start_api():
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
@@ -280,16 +189,9 @@ async def run_discord_bot():
 
     bot.load_extension("bot.cogs.link")
     bot.load_extension("bot.cogs.unlink")
+    bot.load_extension("bot.monthly_relink_bot")
 
     await bot.start(token)
-
-
-@bot.event
-async def on_ready():
-    if not monthly_relink_sweeper.is_running():
-        monthly_relink_sweeper.start()
-    # すでに daily_tier_sync を start しているならそれはそれでそのまま
-    print("✅ monthly_relink_sweeper started")
 
 
 if __name__ == "__main__":

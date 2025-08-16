@@ -1,7 +1,6 @@
-# bot/utils/streak.py（例） ＊既存のutilsに置いてもOK
 import datetime
 from typing import Dict, Any, Optional
-from .twitch import load_linked_users, save_linked_users  # 既存関数を流用
+from .twitch import load_linked_users, save_linked_users
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
 

@@ -5,6 +5,7 @@ import datetime
 import httpx
 from typing import Any, Dict, Optional, Tuple
 import asyncio
+
 # ==================== パス設定（絶対パス） ====================
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
@@ -28,11 +29,11 @@ async def _print_json_response(resp: httpx.Response, label: str = ""):
         print(resp.text)
         return
     print(f"===== {label} JSON =====")
-    print(json.dumps(data, indent=2, ensure_ascii=False))
+    print(json.dumps(data, indent=4, ensure_ascii=False))
     print("=" * 40)
 
-# ==================== 認証情報取得 ====================
 
+# ==================== 認証情報取得 ====================
 def get_twitch_keys() -> Tuple[str, str, str]:
     """
     token.json からクライアント情報を取得
@@ -63,8 +64,8 @@ def get_broadcaster_oauth() -> Tuple[str, str]:
         data = json.load(f)
     return data["twitch_access_token"], str(data["twitch_id"])
 
-# ==================== OAuth URL生成 ====================
 
+# ==================== OAuth URL生成 ====================
 def get_auth_url(discord_user_id: str) -> str:
     client_id, _, redirect_uri = get_twitch_keys()
     base = "https://id.twitch.tv/oauth2/authorize"
@@ -122,7 +123,6 @@ def save_linked_user(
 
 
 # ==================== 内部ユーティリティ（共通クライアント / リクエスト） ====================
-
 def _viewer_headers(viewer_access_token: str, client_id: str) -> Dict[str, str]:
     return {
         "Authorization": f"Bearer {viewer_access_token}",
