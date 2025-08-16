@@ -51,108 +51,105 @@ flowchart LR
     D -->|/link 実行| O[OAuth URL発行]
     O --> B[ブラウザでTwitch認証]
     B --> F[FastAPIコールバック]
-    F -->|Tier情報取得| T[Twitch Helix API]
-    F -->|ロール付与/更新| D
+    F -->|サブスクTier取得| T[Twitch Helix API]
+    F -->|ロール付与| D
 ```
 
 ---
 
-## セットアップ（開発環境）
+## セットアップ手順（ローカル開発環境）
 
-1. **リポジトリ取得**
-   ```bash
-   git clone https://github.com/NAKANORyunosuke/NeiBot.git
-   cd NeiBot
-   ```
+1. **リポジトリをクローン**
+```bash
+git clone https://github.com/NAKANORyunosuke/NeiBot.git
+cd NeiBot
+```
 
 2. **仮想環境作成**
-   ```bash
-   python -m venv venv
-   venv\Scripts\activate
-   ```
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
 
 3. **依存パッケージのインストール**
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+pip install -r requirements.txt
+```
 
-4. **認証情報の設定**  
-   `venv/token.json` を作成:
-   ```json
-   {
-     "discord_token": "YOUR_DISCORD_BOT_TOKEN",
-     "twitch_id": "YOUR_TWITCH_USER_ID",
-     "twitch_client_id": "YOUR_TWITCH_CLIENT_ID",
-     "twitch_seqret_key": "YOUR_TWITCH_SECRET_KEY",
-     "twitch_access_token": "YOUR_TWITCH_ACCESS_TOKEN",
-     "guild_id": 123456789012345678,
-     "twitch_redirect_uri": "http://localhost:8000/twitch_callback",
-     "eventsub_secret": "YOUR_EVENTSUB_SECRET"
-   }
-   ```
+4. **認証情報を設定**  
+   `venv/token.json` に以下を保存
+```json
+{
+  "discord_token": "YOUR_DISCORD_BOT_TOKEN",
+  "twitch_client_id": "YOUR_TWITCH_CLIENT_ID",
+  "twitch_secret_key": "YOUR_TWITCH_SECRET_KEY",
+  "twitch_redirect_uri": "https://your.domain.com/twitch/callback"
+}
+```
 
-5. **Bot 起動**
-   ```bash
-   python -m bot.bot_client
-   ```
-
-   **FastAPI サーバー起動例:**
-   ```bash
-   uvicorn bot.fastapi_server:app --host 0.0.0.0 --port 8000
-   ```
+5. **Bot & APIサーバー起動**
+```bash
+python bot/bot_client.py
+```
 
 ---
 
-## 本番環境構築例（Windows Server）
+## 本番環境構築（Windows Server + Nginx + win-acme）
 
-1. **Python インストール**
-   ```powershell
-   winget install Python.Python.3.12
-   ```
+### 1. Python環境の準備
+```powershell
+winget install Python.Python.3.12
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-2. **Nginx インストール**
-   ```powershell
-   choco install nginx
-   ```
+### 2. Nginxのインストール
+```powershell
+choco install nginx
+```
+Nginx設定ファイル例（`C:\tools\nginx\conf\nginx.conf`）：
+```nginx
+server {
+    listen 80;
+    server_name your.domain.com;
 
-   設定例:
-   ```nginx
-   server {
-       listen 80;
-       server_name your.domain.com;
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
 
-       location / {
-           proxy_pass http://127.0.0.1:8000;
-           proxy_set_header Host $host;
-           proxy_set_header X-Real-IP $remote_addr;
-       }
-   }
-   ```
+### 3. SSL証明書の取得（win-acme）
+1. [win-acme公式サイト](https://www.win-acme.com/)からバイナリをダウンロード  
+2. 実行して `N`（新規証明書作成）を選択  
+3. ドメインを入力し、自動で証明書を取得  
+4. Nginx設定に追記：
+```nginx
+server {
+    listen 443 ssl;
+    server_name your.domain.com;
 
-3. **SSL 設定 (win-acme)**
-   - 証明書を取得し、Nginx に適用
-   ```nginx
-   server {
-       listen 443 ssl;
-       server_name your.domain.com;
+    ssl_certificate     "C:/ProgramData/win-acme/httpsacme-v02.api.letsencrypt.org/acme-v02.pem";
+    ssl_certificate_key "C:/ProgramData/win-acme/httpsacme-v02.api.letsencrypt.org/acme-v02-key.pem";
 
-       ssl_certificate     "C:/ProgramData/win-acme/acme.pem";
-       ssl_certificate_key "C:/ProgramData/win-acme/acme-key.pem";
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
 
-       location / {
-           proxy_pass http://127.0.0.1:8000;
-           proxy_set_header Host $host;
-           proxy_set_header X-Real-IP $remote_addr;
-       }
-   }
-   ```
-
-4. **常時稼働（タスクスケジューラ例）**
-   ```powershell
-   cd C:\path\to\NeiBot
-   venv\Scripts\activate
-   python -m bot.bot_client
-   ```
+### 4. Botの常時稼働
+Windowsのタスクスケジューラで以下を登録：
+```powershell
+cd C:\path\to\NeiBot
+venv\Scripts\activate
+python bot/bot_client.py
+```
 
 ---
 
@@ -160,50 +157,24 @@ flowchart LR
 
 ```
 NeiBot/
-├─ bot/
-│   ├─ bot_client.py         # Discord Bot エントリポイント
-│   ├─ monthly_relink_bot.py # 月初の再リンク処理
-│   └─ utils/                # 共通処理 (Twitch, streak 等)
-├─ venv/
-│   ├─ token.json            # 認証情報 (非公開)
-│   └─ linked_users.json     # Discord↔Twitch リンクデータ
+├─ bot/                # Bot本体
+│   ├─ bot_client.py   # Discord Botエントリーポイント
+│   ├─ utils/          # 共通処理
+│   └─ cogs/           # コマンド機能
+├─ venv/               # 仮想環境 & 認証情報
 └─ requirements.txt
 ```
 
 ---
 
-## linked_users.json の形式
-
-```json
-{
-  "123456789012345678": {
-    "twitch_username": "user_name",
-    "tier": "3000",
-    "is_subscriber": true,
-    "streak_months": 0,
-    "cumulative_months": 0,
-    "bits_score": 0,
-    "bits_rank": null,
-    "linked_date": null,
-    "twitch_user_id": "id",
-    "resolved": true,
-    "first_notice_at": "2025-08-06,
-    "last_verified_at": "2025-08-17",
-    "dm_failed": false
-  }
-}
-```
-
----
-
 ## 今後の拡張予定
-
-- サブスク期限切れの自動検知
-- Bits ランキングによる追加特典ロール
-- Django ベースの管理画面で一斉 DM 配布機能
+- サブスク期限切れチェックの自動化  
+- 一斉DM送信機能  
+- ログ分析による不正アクセス検知  
 
 ---
 
 ## ライセンス
+MIT License  
 
 Apache License 2.0
