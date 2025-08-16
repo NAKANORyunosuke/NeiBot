@@ -164,7 +164,8 @@ class ReLinkCog(commands.Cog):
         guild_id = get_guild_id()
         members_list = load_guild_members()[str(guild_id)].keys()
 
-        for discord_id, s in set(map(str, linked.keys())) | set(map(str, members_list)):
+        for discord_id in set(map(str, linked.keys())) | set(map(str, members_list)):
+            s = linked[discord_id]
             if (s.get("resolved") is True) or (discord_id not in members_list):
                 continue
 
