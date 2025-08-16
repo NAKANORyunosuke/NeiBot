@@ -140,7 +140,7 @@ class ReLinkCog(commands.Cog):
         linked = load_linked_users()
         state = load_relink_state()
         guild_id = get_guild_id()
-        members_list = load_guild_members()[guild_id].keys()
+        members_list = load_guild_members()[str(guild_id)].keys()
         sent = 0
         for discord_id in set(map(str, linked.keys())) | set(map(str, members_list)):
             ok = await send_dm(self.bot, int(discord_id), build_relink_message(discord_id))
@@ -162,7 +162,7 @@ class ReLinkCog(commands.Cog):
 
         resend_cnt = 0
         guild_id = get_guild_id()
-        members_list = load_guild_members()[guild_id].keys()
+        members_list = load_guild_members()[str(guild_id)].keys()
 
         for discord_id, s in list(state.items()):
             if (s.get("resolved") is True) or (discord_id not in members_list):

@@ -32,7 +32,7 @@ def get_auth_url(state: str):
 def get_guild_id():
     with open("./venv/token.json", "r", encoding="utf-8") as f:
         GUILD_ID = json.load(f)['guild_id']
-    return str(GUILD_ID)
+    return GUILD_ID
 
 
 def save_all_guild_members(bot):
