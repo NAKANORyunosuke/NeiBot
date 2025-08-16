@@ -1,58 +1,94 @@
-# NginxAutoBan-Advanced.ps1 (ASCII only, safe quotes)
+# NginxAutoBan-Advanced.ps1  (ASCII only / safe quotes)
+# Purpose:
+#   - Tail nginx access.log on Windows and auto-BAN abusive clients.
+#   - Escalate to /24 CIDR ban when many distinct IPs within a short window.
+#   - Progressive ban durations for recidivists.
+#   - Optional fallback to nginx "deny map" when firewall rule count grows.
+# Notes:
+#   - Run in elevated PowerShell.
+#   - Save file as UTF-8 with CRLF.
+
 param(
   [switch]$Uninstall,
   [switch]$WhatIf
 )
 
-# ===== User settings =====
+# ===================== User Settings =====================
+# Nginx access.log
 $logPath            = "C:\Users\Administrator\Desktop\nginx-1.28.0\logs\access.log"
-$whitelistFile      = "C:\security\whitelist.txt"
-$blacklistStoreJson = "C:\security\autoban_blacklist.json"
 
+# Whitelist/Blacklist store
+$whitelistFile      = "C:\security\whitelist.txt"
+$blacklistStoreJson = "C:\security\autoban_blacklist.json"   # IP/CIDR -> expiry (ISO)
+
+# Malicious URI patterns (regex fragments)
 $badUriPatterns = @(
   "wp-login","wp-admin","/vendor/phpunit/","/HNAP1","/adminer","/phpmyadmin",
   "/\.env","/\.git","auto_prepend_file","\.\./","%2e%2e%2f",
   "UNION\s+SELECT","information_schema","xp_cmdshell","eval\(","%00"
 )
 
+# Per-IP malicious hit threshold (URI-based)
 $badHitThreshold    = 3
+
+# 404 burst ban settings
 $enable404BurstBan  = $true
 $burstWindowSeconds = 60
 $burst404Threshold  = 20
 
+# ---- NEW: Rate-limit BAN (e.g., 3 requests within 1 second) ----
+$enableRateBan      = $true
+$rateWindowSeconds  = 1
+$rateThreshold      = 3
+
+# Recidivism-based ban durations (days -> seconds)
 $banDurations       = @(1,7,30,90) | ForEach-Object { $_ * 24 * 60 * 60 }
 
-$subnetEscalationWindowSec = 600
-$subnetDistinctIPThreshold = 5
+# /24 escalation window and threshold
+$subnetEscalationWindowSec = 600  # seconds
+$subnetDistinctIPThreshold = 5    # distinct IPs within window
 $subnetBanDays             = 7
 $subnetBanSeconds          = $subnetBanDays * 24 * 60 * 60
 
+# Whitelist reload interval
 $whitelistReloadSec = 60
 
+# Firewall rule prefix
 $rulePrefix       = "NginxAutoBan"
+
+# Firewall rule soft limit (fallback to nginx map)
 $maxFirewallRules = 1200
 
+# Optional: nginx deny map fallback
 $enableNginxMapFallback = $true
 $nginxDenyMapPath = "C:\Users\Administrator\Desktop\nginx-1.28.0\conf\deny_ips.map"
 $nginxExePath     = "C:\Users\Administrator\Desktop\nginx-1.28.0\nginx.exe"
 
-# ===== Internal state =====
+# ========================================================
+
+# ===================== Internal State ===================
+# Common log format regex
 $rxLog = [regex]'^(?<ip>\d{1,3}(?:\.\d{1,3}){3})\s+\S+\s+\S+\s+\[[^\]]+\]\s+"(?<method>GET|POST|HEAD|PUT|DELETE|OPTIONS|PATCH)\s+(?<uri>\S+)\s+[^"]+"\s+(?<status>\d{3})\s+'
 $rxBadList = $badUriPatterns | ForEach-Object { [regex]::new($_, 'IgnoreCase') }
 
-$badHits   = @{}
-$hits404   = @{}
-$recidivism= @{}
-$subnetIPs = @{}
-$subnetLastSeen = @{}
+# Per-IP counters / buffers
+$badHits       = @{} # ip -> int (malicious URI count)
+$hits404       = @{} # ip -> List[datetime]
+$hitsAll       = @{} # ip -> List[datetime] (rate-limit window)
+$recidivism    = @{} # ip -> int (how many times banned)
 
-$whitelist = @()
-$blacklist = @{}
+# /24 tracking
+$subnetIPs     = @{} # cidr24 -> HashSet[string] (distinct IPs)
+$subnetLastSeen= @{} # cidr24 -> datetime
+
+# Whitelist / Blacklist
+$whitelist     = @()
+$blacklist     = @{} # key(IP or CIDR) -> expiry(datetime)
 
 $lastWhitelistReload = Get-Date
 $subnetWindow = [TimeSpan]::FromSeconds($subnetEscalationWindowSec)
 
-# ===== Functions =====
+# ===================== Functions ========================
 function Load-Whitelist {
   param([string]$Path)
   if (Test-Path $Path) {
@@ -112,7 +148,7 @@ function Ensure-NginxDenyMapEntry { param([string]$cidr)
     "# ip/cidr   1;" | Set-Content -Path $nginxDenyMapPath -Encoding UTF8
   }
   $pattern = ('^\Q{0}\E\s+1;' -f $cidr)
-  $exists = Select-String -Path $nginxDenyMapPath -Pattern $pattern -AllMatches
+  $exists  = Select-String -Path $nginxDenyMapPath -Pattern $pattern -AllMatches
   if (-not $exists) {
     Add-Content -Path $nginxDenyMapPath -Value ('{0}  1;' -f $cidr)
     if (-not $WhatIf) { & $nginxExePath -s reload | Out-Null }
@@ -135,7 +171,7 @@ function Add-FirewallBan {
   if ($curRules -ge $maxFirewallRules) {
     if ($enableNginxMapFallback) {
       Ensure-NginxDenyMapEntry -cidr $key
-      Write-Host ('[Fallback] Nginx deny map: {0}' -f $key)
+      Write-Host ('[Fallback] nginx deny map: {0}' -f $key)
       return
     }
   }
@@ -211,15 +247,54 @@ function Register-SubnetHit { param([string]$ip)
   }
 }
 
-function Register-OffenseAndMaybeBan { param($e)
+# ---- NEW: Rate-limit BAN ----
+function Register-RateHitAndMaybeBan { param([string]$ip)
+  if (-not $enableRateBan) { return }
+
+  if (-not $hitsAll.ContainsKey($ip)) {
+    $hitsAll[$ip] = New-Object System.Collections.Generic.List[datetime]
+  }
+  $lst = $hitsAll[$ip]
+  $now = Get-Date
+  $lst.Add($now)
+
+  # drop old entries outside the window
+  while ($lst.Count -gt 0 -and ($now - $lst[0]).TotalSeconds -gt $rateWindowSeconds) {
+    $lst.RemoveAt(0)
+  }
+
+  if ($lst.Count -ge $rateThreshold) {
+    # already banned? skip
+    foreach ($k in $blacklist.Keys) {
+      if ($k -match "/") { if (Test-IpInCidr -IP $ip -CIDR $k) { return } }
+      elseif ($k -eq $ip) { return }
+    }
+
+    $count = ($recidivism[$ip] | ForEach-Object { $_ }); if (-not $count) { $count = 0 }
+    $idx = [Math]::Min($count, $banDurations.Count - 1)
+    Add-FirewallBan -key $ip -seconds $banDurations[$idx]
+    $recidivism[$ip] = $count + 1
+    Register-SubnetHit -ip $ip
+    $hitsAll.Remove($ip) | Out-Null
+  }
+}
+
+function Register-OffenseAndMaybeBan {
+  param($e)
+
   $ip = $e.IP
   if (Is-Whitelisted $ip) { return }
 
+  # Rate-limit BAN check (first)
+  Register-RateHitAndMaybeBan -ip $ip
+
+  # If already banned (IP/CIDR), skip further checks
   foreach ($k in $blacklist.Keys) {
     if ($k -match "/") { if (Test-IpInCidr -IP $ip -CIDR $k) { return } }
     elseif ($k -eq $ip) { return }
   }
 
+  # Malicious URI threshold
   $matchedBad = $false
   foreach ($rx in $rxBadList) { if ($rx.IsMatch($e.URI)) { $matchedBad = $true; break } }
   if ($matchedBad) {
@@ -235,6 +310,7 @@ function Register-OffenseAndMaybeBan { param($e)
     }
   }
 
+  # 404 burst threshold
   if ($enable404BurstBan -and $e.Status -eq 404) {
     if (-not $hits404.ContainsKey($ip)) {
       $hits404[$ip] = New-Object System.Collections.Generic.List[datetime]
@@ -242,7 +318,9 @@ function Register-OffenseAndMaybeBan { param($e)
     $lst = $hits404[$ip]
     $now = Get-Date
     $lst.Add($now)
-    while ($lst.Count -gt 0 -and ($now - $lst[0]).TotalSeconds -gt $burstWindowSeconds) { $lst.RemoveAt(0) }
+    while ($lst.Count -gt 0 -and ($now - $lst[0]).TotalSeconds -gt $burstWindowSeconds) {
+      $lst.RemoveAt(0)
+    }
     if ($lst.Count -ge $burst404Threshold) {
       $count = ($recidivism[$ip] | ForEach-Object { $_ }); if (-not $count) { $count = 0 }
       $idx = [Math]::Min($count, $banDurations.Count - 1)
@@ -254,15 +332,17 @@ function Register-OffenseAndMaybeBan { param($e)
   }
 }
 
-# ===== Main =====
+# ===================== Main ==============================
 if ($Uninstall) { Uninstall-AllBans; exit 0 }
 
 Write-Host ('[Start] NginxAutoBan: {0}' -f $logPath)
 if (-not (Test-Path $logPath)) { Write-Error ('Access log not found: {0}' -f $logPath); exit 1 }
 
+# Initial load
 $whitelist = Load-Whitelist -Path $whitelistFile
 $blacklist = Load-BlacklistStore -Path $blacklistStoreJson
 
+# Restore existing firewall rules for known blacklist
 foreach ($k in $blacklist.Keys) {
   $ruleName = '{0} {1}' -f $rulePrefix, $k
   if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
@@ -274,6 +354,7 @@ foreach ($k in $blacklist.Keys) {
   }
 }
 
+# Tail -f (start from EOF)
 Get-Content -Path $logPath -Tail 0 -Wait -Encoding UTF8 | ForEach-Object {
   if ((Get-Date) - $lastWhitelistReload -gt [TimeSpan]::FromSeconds($whitelistReloadSec)) {
     $whitelist = Load-Whitelist -Path $whitelistFile
