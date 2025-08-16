@@ -13,71 +13,22 @@
 
 from __future__ import annotations
 import os
-import json
 import asyncio
 import datetime as dt
-from typing import Dict, Any
 
 import discord
 from discord.ext import commands
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from bot.common import save_all_guild_members, load_guild_members, get_guild_id
+from bot.utils.save_and_load import *
+from bot.common import debug_print
 
 # ========= 定数・パス =========
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA_DIR = os.path.join(PROJECT_ROOT, "venv")
-LINKED_USERS_FILE = os.path.join(DATA_DIR, "linked_users.json")
-RELINK_STATE_FILE = os.path.join(DATA_DIR, "relink_state.json")
+USERS_FILE = os.path.join(DATA_DIR, "all_users.json")
 JST = dt.timezone(dt.timedelta(hours=9))
-
-
-# ========= 共通ユーティリティ =========
-def _load_json(path: str) -> Dict[str, Any]:
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _save_json(path: str, data: Dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-
-
-def load_linked_users() -> Dict[str, Any]:
-    """
-    linked_users.json 例:
-    {
-        "123456789012345678": {
-            "twitch_login": "foo",
-            "linked_at": "2025-08-01T12:34:56+09:00",
-            "last_verified_at": "2025-08-10T09:00:00+09:00",
-            "tier": "Tier1"
-        }
-    }
-    """
-    return _load_json(LINKED_USERS_FILE)
-
-
-def load_relink_state() -> Dict[str, Any]:
-    """
-    relink_state.json 例:
-    {
-        "123456789012345678": {
-            "first_notice_at": "2025-09-01T09:05:00+09:00",
-            "last_notice_at": "2025-09-08T09:05:00+09:00",
-            "resolved": false
-        }
-    }
-    """
-    return _load_json(RELINK_STATE_FILE)
-
-
-def save_relink_state(data: Dict[str, Any]) -> None:
-    _save_json(RELINK_STATE_FILE, data)
 
 
 def jst_now() -> dt.datetime:
@@ -105,7 +56,7 @@ async def send_dm(bot: commands.Bot, discord_user_id: int, content: str) -> bool
         await user.send(content)
         return True
     except Exception as e:
-        print(f"[DM送信失敗] user={discord_user_id} err={e!r}")
+        debug_print(f"[DM送信失敗] user={discord_user_id} err={e!r}")
         return False
 
 
@@ -114,11 +65,9 @@ def mark_resolved(discord_id: str) -> None:
     OAuth完了や当月の購読確認がとれたタイミングで呼ぶと、再送対象から外れる。
     既存のOAuthコールバックや検証処理から利用してください。
     """
-    state = load_relink_state()
-    if discord_id in state:
-        # print(discord_id, state)
-        state[discord_id]["resolved"] = True
-        save_relink_state(state)
+    state = load_users()
+    state[str(discord_id)]["resolved"] = True
+    save_linked_users(state)
 
 
 # ========= Cog 実装 =========
@@ -134,42 +83,34 @@ class ReLinkCog(commands.Cog):
     async def notify_monthly_relink(self, *, force: bool = False) -> None:
         now = jst_now()
         if not force and now.day != 1:
-            print("[monthly] 月初めではないためスキップ")
+            debug_print("[monthly] 月初めではないためスキップ")
             return
 
-        linked = load_linked_users()
-        state = load_relink_state()
-        guild_id = get_guild_id()
-        members_list = load_guild_members()[str(guild_id)].keys()
+        state = load_users()
+
         sent = 0
-        for discord_id in set(map(str, linked.keys())) | set(map(str, members_list)):
+        for discord_id in list(state.keys()):
             ok = await send_dm(self.bot, int(discord_id), build_relink_message(discord_id))
             if ok:
                 sent += 1
-                s = state.setdefault(discord_id, {})
-                s["first_notice_at"] = now.isoformat()
-                s["last_notice_at"] = now.isoformat()
-                s["resolved"] = False
+                state[str(discord_id)]["first_notice_at"] = now.isoformat()
+                state[str(discord_id)]["last_notice_at"] = now.isoformat()
+                state[str(discord_id)]["resolved"] = False
             await asyncio.sleep(1)  # レート制御（必要に応じて調整）
 
-        save_relink_state(state)
-        print(f"[monthly] 送信完了: {sent}件")
+        save_linked_users(state)
+        debug_print(f"[monthly] 送信完了: {sent}件")
 
     async def resend_after_7days_if_unlinked(self) -> None:
         now = jst_now()
-        linked = load_linked_users()
-        state = load_relink_state()
-
+        users = load_users()
         resend_cnt = 0
-        guild_id = get_guild_id()
-        members_list = load_guild_members()[str(guild_id)].keys()
 
-        for discord_id in set(map(str, linked.keys())) | set(map(str, members_list)):
-            s = linked[discord_id]
-            if (s.get("resolved") is True) or (discord_id not in members_list):
+        for discord_id in list(users.keys()):
+            if users[str(discord_id)]["resolved"]:
                 continue
 
-            first_str = s.get("first_notice_at")
+            first_str = users[str(discord_id)].get("first_notice_at")
             if not first_str:
                 continue
 
@@ -183,29 +124,33 @@ class ReLinkCog(commands.Cog):
                 continue
 
             # 「当月に検証済み(last_verified_at)」なら解決扱い
-            lu = linked.get(discord_id)
-            if lu and lu.get("last_verified_at"):
+            lu = users.get(str(discord_id))
+            if lu.get("last_verified_at") is not None:
                 try:
                     last_ver = dt.datetime.fromisoformat(lu["last_verified_at"])
                     if (last_ver.year == now.year) and (last_ver.month == now.month):
-                        s["resolved"] = True
+                        users["resolved"] = True
                         continue
                 except Exception:
                     pass
+            else:
+                users["resolved"] = False
 
             ok = await send_dm(self.bot, int(discord_id), build_relink_message(discord_id))
             if ok:
-                s["last_notice_at"] = now.isoformat()
+                users["last_notice_at"] = now.isoformat()
                 resend_cnt += 1
 
             await asyncio.sleep(0.5)
 
-        save_relink_state(state)
-        print(f"[resend] 再送完了: {resend_cnt}件")
+        save_linked_users(users)
+        debug_print(f"[resend] 再送完了: {resend_cnt}件")
 
     # ===== イベントでスケジューラ起動 =====
     @commands.Cog.listener()
     async def on_ready(self):
+        save_all_guild_members(self.bot)
+        
         # 複数回 on_ready が来ても二重起動しないように
         if self._scheduler_started:
             return
@@ -226,9 +171,8 @@ class ReLinkCog(commands.Cog):
         )
         self.scheduler.start()
         self._scheduler_started = True
-        print("[scheduler] started")
+        debug_print("[scheduler] started")
         
-        save_all_guild_members(self.bot)
 
     # ===== テスト用スラッシュコマンド =====
     @discord.slash_command(name="force_relink", description="（テスト）今すぐ全員に再リンクDMを送ります")
@@ -245,7 +189,7 @@ class ReLinkCog(commands.Cog):
 
     @discord.slash_command(name="relink_status", description="（テスト）再リンク状態の要約を表示します")
     async def relink_status(self, ctx: discord.ApplicationContext):
-        state = load_relink_state()
+        state = load_users()
         unresolved = [k for k, v in state.items() if not v.get("resolved")]
         await ctx.respond(
             f"未解決ユーザー: {len(unresolved)}件\n"

@@ -1,16 +1,16 @@
 import json
 import os
 import urllib.parse
-import datetime
 import httpx
 from typing import Any, Dict, Optional, Tuple
 import asyncio
-
+from bot.utils.save_and_load import *
+from bot.common import debug_print
 # ==================== パス設定（絶対パス） ====================
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 TOKEN_PATH = os.path.join(PROJECT_ROOT, "venv", "token.json")
-LINKED_USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "linked_users.json")
+USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "all_users.json")
 
 API_BASE = "https://api.twitch.tv/helix"
 
@@ -25,44 +25,12 @@ async def _print_json_response(resp: httpx.Response, label: str = ""):
     try:
         data = resp.json()
     except Exception as e:
-        print(f"[{label}] JSON decode error: {e!r}")
-        print(resp.text)
+        debug_print(f"[{label}] JSON decode error: {e!r}")
+        debug_print(resp.text)
         return
-    print(f"===== {label} JSON =====")
-    print(json.dumps(data, indent=4, ensure_ascii=False))
-    print("=" * 40)
-
-
-# ==================== 認証情報取得 ====================
-def get_twitch_keys() -> Tuple[str, str, str]:
-    """
-    token.json からクライアント情報を取得
-    NOTE: ユーザー環境では secret キー名が "twitch_seqret_key" なので踏襲
-    """
-    with open(TOKEN_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data["twitch_client_id"], data["twitch_seqret_key"], data["twitch_redirect_uri"]
-
-
-def get_broadcast_id() -> str:
-    """ブロードキャスター（配信者）の user_id を返す"""
-    with open(TOKEN_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return str(data["twitch_id"])  # 既存キーを踏襲
-
-
-def get_broadcaster_oauth() -> Tuple[str, str]:
-    """
-    ブロードキャスター用のアクセストークンと user_id を返す
-    例:
-    {
-        "twitch_access_token": "...",        # broadcaster token
-        "twitch_id": "12345678"              # broadcaster user_id
-    }
-    """
-    with open(TOKEN_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data["twitch_access_token"], str(data["twitch_id"])
+    debug_print(f"===== {label} JSON =====")
+    debug_print(json.dumps(data, indent=4, ensure_ascii=False))
+    debug_print("=" * 40)
 
 
 # ==================== OAuth URL生成 ====================
@@ -77,49 +45,6 @@ def get_auth_url(discord_user_id: str) -> str:
         "state": discord_user_id,
     }
     return f"{base}?{urllib.parse.urlencode(params)}"
-
-
-# ==================== JSON読み書き ====================
-
-def load_linked_users() -> Dict[str, Any]:
-    if not os.path.exists(LINKED_USERS_FILE):
-        return {}
-    with open(LINKED_USERS_FILE, "r", encoding="utf-8") as f:
-        content = f.read().strip()
-        if not content:
-            return {}
-        return json.loads(content)
-
-
-def save_linked_users(data: Dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(LINKED_USERS_FILE), exist_ok=True)
-    with open(LINKED_USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False, default=str)
-
-
-def save_linked_user(
-    discord_id: str,
-    twitch_username: str,
-    tier: Optional[str],
-    streak_months: int,
-    cumulative_months: int,
-    bits_score: int | None = None,
-    bits_rank: int | None = None,
-) -> None:
-    data = load_linked_users()
-    dt = datetime.date.today()
-
-    data[discord_id] = {
-        "twitch_username": twitch_username,
-        "tier": tier,  # "1000"/"2000"/"3000" or None
-        "is_subscriber": tier is not None,
-        "streak_months": int(streak_months or 0),
-        "cumulative_months": int(cumulative_months or 0),
-        "bits_score": int(bits_score or 0) if bits_score is not None else 0,
-        "bits_rank": bits_rank,
-        "linked_date": dt.isoformat(),
-    }
-    save_linked_users(data)
 
 
 # ==================== 内部ユーティリティ（共通クライアント / リクエスト） ====================
@@ -185,9 +110,9 @@ async def _request_json(
 async def _get_me_and_login(client: httpx.AsyncClient, headers: Dict[str, str]) -> Tuple[str, str]:
     """ /users で自分の id と login を取得 """
     r = await _request_json(client, "GET", f"{API_BASE}/users", headers=headers)
-    print("[DEBUG] /users status:", r.status_code)
+    debug_print("[DEBUG] /users status:", r.status_code)
     try:
-        print("[DEBUG] /users body:", r.text)
+        debug_print("[DEBUG] /users body:", r.text)
     except Exception:
         pass
     r.raise_for_status()
@@ -210,8 +135,8 @@ async def _get_user_subscription_to_broadcaster(
     """
     params = {"broadcaster_id": broadcaster_id, "user_id": user_id}
     r = await _request_json(client, "GET", f"{API_BASE}/subscriptions/user", headers=headers, params=params)
-    print("[DEBUG] /subscriptions/user status:", r.status_code)
-    print("[DEBUG] /subscriptions/user body:", r.text)
+    debug_print("[DEBUG] /subscriptions/user status:", r.status_code)
+    debug_print("[DEBUG] /subscriptions/user body:", r.text)
     await _print_json_response(r, "/users")
     if r.status_code == 404:
         # 「対象なし」パターン
@@ -238,8 +163,8 @@ async def _get_bits_leaderboard_for_user(
         "user_id": user_id,
     }
     r = await _request_json(client, "GET", f"{API_BASE}/bits/leaderboard", headers=headers, params=params)
-    print("[DEBUG] /bits/leaderboard status:", r.status_code)
-    print("[DEBUG] /bits/leaderboard body:", r.text)
+    debug_print("[DEBUG] /bits/leaderboard status:", r.status_code)
+    debug_print("[DEBUG] /bits/leaderboard body:", r.text)
 
     # 401（トークン失効/スコープ不足）などは呼び出し元で raise したいのでここで raise_for_status する
     if r.status_code == 404:
@@ -311,8 +236,8 @@ async def get_user_info_and_subscription(
             result["bits_score"] = int(bits_score or 0)
         except httpx.HTTPStatusError as e:
             # スコープ不足やトークン失効などの場合はログだけ出して0扱いに
-            print(f"[WARN] bits leaderboard fetch failed: {e.response.status_code} {e.response.text}")
+            debug_print(f"[WARN] bits leaderboard fetch failed: {e.response.status_code} {e.response.text}")
         except httpx.HTTPError as e:
-            print(f"[WARN] bits leaderboard fetch http error: {e!r}")
+            debug_print(f"[WARN] bits leaderboard fetch http error: {e!r}")
 
         return result

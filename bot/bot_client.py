@@ -10,20 +10,16 @@ from fastapi.responses import PlainTextResponse
 import uvicorn
 import httpx
 import os
-from bot.common import save_all_guild_members
+from bot.common import debug_print
 from bot.utils.streak import reconcile_and_save_link
-from bot.utils.twitch import (
-    get_twitch_keys,
-    get_user_info_and_subscription,
-    get_broadcast_id,
-)
-
+from bot.utils.save_and_load import *
+from bot.utils.twitch import get_user_info_and_subscription
 
 # ==================== パス設定（絶対パス） ====================
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "./"))
 TOKEN_PATH = os.path.join(PROJECT_ROOT, "venv", "token.json")
-LINKED_USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "linked_users.json")
+USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "all_users.json")
 
 
 # ===== Discord Bot の準備 =====
@@ -39,11 +35,12 @@ app = FastAPI()
 def run_in_bot_loop(coro: Coroutine[Any, Any, Any]):
     """Discord Bot のイベントループで coro を実行して、例外をログに出す"""
     fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
+
     def _done(f):
         try:
             f.result()
         except Exception as e:
-            print("❌ notify error:", repr(e))
+            debug_print("❌ notify error:", repr(e))
     fut.add_done_callback(_done)
     return fut
 
@@ -53,7 +50,7 @@ async def notify_discord_user(discord_id: int, twitch_name: str, tier: str, stre
     await bot.wait_until_ready()
     user = await bot.fetch_user(discord_id)
     if not user:
-        print(f"⚠ fetch_user({discord_id}) が None")
+        debug_print(f"⚠ fetch_user({discord_id}) が None")
         return
     msg = f"✅ Twitch `{twitch_name}` とリンクしました！Tier: {tier}"
     if streak is not None:
@@ -69,29 +66,9 @@ async def notify_link(discord_id: int, twitch_name: str, tier: str):
 
 
 # ---- API: Twitch OAuth コールバック ----
-
-# 既存ユーティリティ想定:
-# - get_twitch_keys() -> (client_id, client_secret, redirect_uri)
-# - get_broadcast_id() -> broadcaster_id(str or int)
-# - get_user_info_and_subscription(viewer_access_token, client_id, broadcaster_id) -> dict
-#   返り値例:
-#   {
-#     "twitch_username": str,
-#     "twitch_user_id": str,
-#     "tier": "1000"|"2000"|"3000"|None,
-#     "streak_months": int,
-#     "cumulative_months": int,
-#     "bits_rank": Optional[int],
-#     "bits_score": int,
-#     "is_subscriber": bool,
-#   }
-# - save_linked_user(...) は旧版(引数: discord_id, twitch_username, tier, streak) or
-#                         新版(引数: discord_id, twitch_username, tier, streak_months, cumulative_months, bits_score, bits_rank)
-# - run_in_bot_loop(coro) / notify_discord_user(user_id:int, name:str, tier, streak)
-
 @app.get("/twitch_callback")
 async def twitch_callback(request: Request):
-    print("✅ [twitch_callback] にアクセスがありました")
+    debug_print("✅ [twitch_callback] にアクセスがありました")
     code = request.query_params.get("code")
     state = request.query_params.get("state")  # DiscordのユーザーID（str）
 
@@ -133,7 +110,7 @@ async def twitch_callback(request: Request):
     try:
         broadcaster_id_raw = get_broadcast_id()
         BROADCASTER_ID = str(broadcaster_id_raw)
-        print(f"[DEBUG] get_broadcast_id -> {BROADCASTER_ID!r}")
+        debug_print(f"[DEBUG] get_broadcast_id -> {BROADCASTER_ID!r}")
     except Exception as e:
         return PlainTextResponse(f"Failed to resolve broadcaster_id: {e!r}", status_code=500)
 
@@ -155,14 +132,14 @@ async def twitch_callback(request: Request):
 
     # 5) リンク情報を保存（streak自前更新版）
     try:
+        # debug_print("reconcile_and_save_link success")
         rec = reconcile_and_save_link(str(state), info)
     except Exception as e:
-        print(f"❌ reconcile_and_save_link failed: {e!r}")
+        debug_print(f"❌ reconcile_and_save_link failed: {e!r}")
         rec = info  # 万一失敗したら元のinfoを使う
 
     # 6) Discord通知
     try:
-        print("notify_discord_user の呼び出し")
         run_in_bot_loop(
             notify_discord_user(
                 int(state),
@@ -172,7 +149,7 @@ async def twitch_callback(request: Request):
             )
         )
     except Exception as e:
-        print("❌ failed to schedule notify:", repr(e))
+        debug_print("❌ failed to schedule notify:", repr(e))
 
     return PlainTextResponse("Notified in background", status_code=200)
 

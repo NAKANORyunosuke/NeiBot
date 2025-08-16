@@ -5,9 +5,11 @@ from typing import Optional
 
 import discord
 from discord.ext import commands  # tasksを使わないならtasksは不要
-from bot.utils.twitch import get_auth_url, load_linked_users, save_linked_users
+from bot.utils.twitch import get_auth_url
 from bot.monthly_relink_bot import mark_resolved
 import os
+from bot.utils.save_and_load import *
+
 
 # ==== ロールID（あなたのサーバ設定） ====
 ROLE_TWITCH_LINKED = 1403053988991205509  # Twitch-linked
@@ -23,7 +25,7 @@ TIER_ROLE_MAP = {
 ALL_TIER_ROLE_IDS = {ROLE_TIER1, ROLE_TIER2, ROLE_TIER3}
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 TOKEN_PATH = os.path.join(PROJECT_ROOT, "venv", "token.json")
-LINKED_USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "linked_users.json")
+USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "all_users.json")
 
 
 class LinkCog(commands.Cog):
@@ -73,11 +75,11 @@ class LinkCog(commands.Cog):
         # ⏳ 連携完了を10秒ごとに最大60秒間ポーリング
         for _ in range(6):  # 10s x 6 = 60s
             await asyncio.sleep(10)
-            linked_users = load_linked_users()
-            if discord_id not in linked_users:
+            users = load_users()
+            if discord_id not in list(users.keys()):
                 continue
 
-            info = linked_users[discord_id]
+            info = users[str(discord_id)]
             twitch_name = info.get("twitch_username")
             is_sub = info.get("is_subscriber", False)
             tier = info.get("tier")  # "1000"/"2000"/"3000" or None
@@ -89,13 +91,14 @@ class LinkCog(commands.Cog):
                 member = None
 
             if member is not None:
-                mark_resolved(discord_id)
                 try:
                     await self._ensure_roles_for_member(member, tier)
                 except discord.Forbidden:
                     await ctx.author.send("⚠ Botにロール管理権限が不足しているため、ロール付与に失敗しました。管理者に連絡してください。")
                 except Exception as e:
                     await ctx.author.send(f"⚠ ロール付与中にエラーが発生しました: {e!r}")
+
+            mark_resolved(discord_id)
 
             # DM通知（Tier番号の見やすい表記）
             tier_msg = "0"
@@ -113,20 +116,19 @@ class LinkCog(commands.Cog):
                 f"・Tier: {tier_msg}\n"
                 "※ ロールが反映されていない場合は、数秒待ってから再度ご確認ください。"
             )
-            data = load_linked_users()
+
             try:
-                data[discord_id]['dm_failed'] = True
+                users[str(discord_id)]['dm_failed'] = False
                 await ctx.author.send(msg)
             except discord.Forbidden:
-                data[discord_id]['dm_failed'] = False
-                data[discord_id]['dm_failed_reason'] = "DM拒否 (Forbidden)"
-                return
+                users[str(discord_id)]['dm_failed'] = True
+                users[str(discord_id)]['dm_failed_reason'] = "DM拒否 (Forbidden)"
             except discord.HTTPException as e:
-                data[discord_id]['dm_failed'] = False
-                data[discord_id]['dm_failed_reason'] = f"HTTPエラー: {e}"
+                users[str(discord_id)]['dm_failed'] = True
+                users[str(discord_id)]['dm_failed_reason'] = f"HTTPエラー: {e}"
             finally:
-                save_linked_users(data)
-            return
+                save_linked_users(users)
+                return
 
         # タイムアウト
         await ctx.author.send("⏳ 60秒経っても連携が完了しませんでした。もう一度 `/link` をお試しください。")

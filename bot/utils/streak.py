@@ -1,15 +1,18 @@
 import datetime
 from typing import Dict, Any, Optional
-from .twitch import load_linked_users, save_linked_users
+from bot.utils.save_and_load import *
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
+
 
 def _yyyymm(d: datetime.date) -> int:
     return d.year * 100 + d.month
 
+
 def _month_diff(a: datetime.date, b: datetime.date) -> int:
     """a→b の“月差”（a<b でも正）"""
     return (b.year - a.year) * 12 + (b.month - a.month)
+
 
 def reconcile_and_save_link(discord_id: str, info: Dict[str, Any], today: Optional[datetime.date] = None) -> Dict[str, Any]:
     """
@@ -20,10 +23,23 @@ def reconcile_and_save_link(discord_id: str, info: Dict[str, Any], today: Option
     - 月差>1（空白がある）や、先月非サブ→今月サブ なら streak = 1（再開）
     - cumulative_months が増えていれば +1 の整合も取る
     """
+    """
+    info =
+    {
+        "twitch_username": str,
+        "twitch_user_id": str,
+        "tier": "1000"|"2000"|"3000"|None,
+        "streak_months": int,
+        "cumulative_months": int,
+        "bits_rank": Optional[int],
+        "bits_score": int,
+        "is_subscriber": bool,
+    }
+    """
     if today is None:
         today = datetime.datetime.now(JST).date()
 
-    linked = load_linked_users()
+    linked = load_users()
     prev = linked.get(discord_id, {})
 
     prev_linked_iso = prev.get("linked_date")  # "YYYY-MM-DD"
@@ -70,18 +86,12 @@ def reconcile_and_save_link(discord_id: str, info: Dict[str, Any], today: Option
     else:
         # 非サブならリセット
         new_streak = 0
-
-    # 保存内容を作る（既存のスキーマを踏襲）
-    rec = {
-        "twitch_username": info.get("twitch_username"),
-        "tier": tier,
-        "is_subscriber": is_sub,
-        "streak_months": new_streak,
-        "cumulative_months": cum,
-        "bits_score": int(info.get("bits_score", 0) or 0),
-        "bits_rank": info.get("bits_rank"),
-        "linked_date": today.isoformat(),
-    }
-    linked[discord_id] = rec
+    for key in list(info.keys()):
+        linked[str(discord_id)][key] = info[key]
+    
+    linked[str(discord_id)]["resolved"] = True
+    linked[str(discord_id)]["first_notice_at"] = None
+    linked[str(discord_id)]["last_verified_at"] = today
+    
     save_linked_users(linked)
-    return rec
+    return linked[str(discord_id)]
