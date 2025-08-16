@@ -190,7 +190,7 @@ class ReLinkCog(commands.Cog):
     @discord.slash_command(name="relink_status", description="（テスト）再リンク状態の要約を表示します")
     async def relink_status(self, ctx: discord.ApplicationContext):
         state = load_users()
-        unresolved = [k for k, v in state.items() if not v.get("resolved")]
+        unresolved = [k for k, v in state.items() if not v.get("resolved", False)]
         await ctx.respond(
             f"未解決ユーザー: {len(unresolved)}件\n"
             f"ユーザーID一覧（最大10件）: {', '.join(unresolved[:10]) if unresolved else 'なし'}",
