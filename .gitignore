@@ -1,0 +1,10 @@
+venv
+TOKEN
+
+**/*.pyc
+__pycache__
+db.sqlite3
+test.py
+NeiBot.zip
+zip_for_ChatGPT.bat
+.vscode
