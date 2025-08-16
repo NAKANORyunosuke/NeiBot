@@ -163,7 +163,7 @@ class ReLinkCog(commands.Cog):
         resend_cnt = 0
         guild_id = get_guild_id()
         members_list = load_guild_members()[guild_id].keys()
-        
+
         for discord_id, s in list(state.items()):
             if (s.get("resolved") is True) or (discord_id not in members_list):
                 continue
