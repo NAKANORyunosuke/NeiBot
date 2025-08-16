@@ -172,7 +172,6 @@ class ReLinkCog(commands.Cog):
         self.scheduler.start()
         self._scheduler_started = True
         debug_print("[scheduler] started")
-        
 
     # ===== テスト用スラッシュコマンド =====
     @discord.slash_command(name="force_relink", description="（テスト）今すぐ全員に再リンクDMを送ります")

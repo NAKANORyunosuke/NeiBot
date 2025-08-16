@@ -167,6 +167,7 @@ async def run_discord_bot():
     bot.load_extension("bot.cogs.link")
     bot.load_extension("bot.cogs.unlink")
     bot.load_extension("bot.monthly_relink_bot")
+    bot.load_extension("bot.cogs.auto_link_dm")
 
     await bot.start(token)
 
