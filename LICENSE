@@ -1,0 +1,54 @@
+商用利用禁止ライセンス（Non-Commercial License）
+==============================================
+
+Copyright (c) 2025 NAKANO Ryunosuke
+
+本ソフトウェアおよび付随するドキュメントファイル（以下「本ソフトウェア」）の利用は、
+以下の条件に従うものとします。
+
+1. 利用許可
+   - 本ソフトウェアは、**個人的または非営利目的**での利用に限り許可されます。
+   - 学術研究、個人利用、教育目的での利用は自由です。
+
+2. 禁止事項
+   - 本ソフトウェアを **営利目的**（販売、商用サービスへの組込み、有償提供など）で利用することを禁止します。
+   - 本ソフトウェアの一部または全部を利用して、直接的または間接的に収益を得ることを禁止します。
+   - 著作権表示を削除、改変することを禁止します。
+
+3. 再配布
+   - 本ソフトウェアを改変または再配布する場合も、必ず本ライセンスを同梱しなければなりません。
+   - 改変を行った場合は、その旨を明示してください。
+
+4. 免責事項
+   - 本ソフトウェアは「現状のまま」提供されます。
+   - 作者は、本ソフトウェアの利用によって生じたいかなる損害についても責任を負いません。
+
+-------------------------------------------------------
+
+Non-Commercial License
+=======================
+
+Copyright (c) 2025 NAKANO Ryunosuke
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use
+the Software subject to the following conditions:
+
+1. Permitted Use
+   - The Software may be used for **personal or non-commercial purposes only**.
+   - Academic research, personal projects, and educational use are allowed.
+
+2. Prohibited Use
+   - The Software may **NOT** be used for commercial purposes, including but not limited to:
+     - Selling the Software
+     - Incorporating it into paid products or services
+     - Any activity intended to generate direct or indirect revenue
+   - Removal or alteration of copyright notices is prohibited.
+
+3. Redistribution
+   - Redistribution or modification of the Software must include this license.
+   - Any modifications must be clearly stated.
+
+4. Disclaimer
+   - The Software is provided "AS IS", without warranty of any kind.
+   - The author shall not be held liable for any damages arising from the use of the Software.
