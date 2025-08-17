@@ -107,10 +107,10 @@ class ReLinkCog(commands.Cog):
         resend_cnt = 0
 
         for discord_id in list(users.keys()):
-            if users[str(discord_id)]["resolved"]:
+            if users[str(discord_id)].get("resolved", False):
                 continue
 
-            first_str = users[str(discord_id)].get("first_notice_at")
+            first_str = users[str(discord_id)].get("first_notice_at", None)
             if not first_str:
                 continue
 
@@ -125,7 +125,7 @@ class ReLinkCog(commands.Cog):
 
             # 「当月に検証済み(last_verified_at)」なら解決扱い
             lu = users.get(str(discord_id))
-            if lu.get("last_verified_at") is not None:
+            if lu.get("last_verified_at", None) is not None:
                 try:
                     last_ver = dt.datetime.fromisoformat(lu["last_verified_at"])
                     if (last_ver.year == now.year) and (last_ver.month == now.month):
