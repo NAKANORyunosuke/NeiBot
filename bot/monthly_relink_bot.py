@@ -99,7 +99,7 @@ class ReLinkCog(commands.Cog):
             await asyncio.sleep(1)  # レート制御（必要に応じて調整）
 
         save_linked_users(state)
-        debug_print(f"[monthly] 送信完了: {sent}件")
+        print(f"[monthly] 送信完了: {sent}件")
 
     async def resend_after_7days_if_unlinked(self) -> None:
         now = jst_now()
@@ -111,7 +111,7 @@ class ReLinkCog(commands.Cog):
                 continue
 
             first_str = users[str(discord_id)].get("first_notice_at", None)
-            if not first_str:
+            if first_str is None:
                 continue
 
             try:
@@ -144,7 +144,7 @@ class ReLinkCog(commands.Cog):
             await asyncio.sleep(0.5)
 
         save_linked_users(users)
-        debug_print(f"[resend] 再送完了: {resend_cnt}件")
+        print(f"[resend] 再送完了: {resend_cnt}件")
 
     # ===== イベントでスケジューラ起動 =====
     @commands.Cog.listener()

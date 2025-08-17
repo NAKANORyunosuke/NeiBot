@@ -151,7 +151,7 @@ async def twitch_callback(request: Request):
     except Exception as e:
         debug_print("❌ failed to schedule notify:", repr(e))
 
-    return PlainTextResponse("Notified in background", status_code=200)
+    return PlainTextResponse("連携完了", status_code=200)
 
 
 # ===== FastAPI を別スレッドで起動 =====
