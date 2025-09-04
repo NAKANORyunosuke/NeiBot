@@ -241,17 +241,18 @@ async def ensure_role_exists(
     return role
 
 
-async def make_subrole(bot):
+async def role_data(bot):
     guilds = bot.guilds
 
     role_data = load_role_ids()
 
     for guild in guilds:
         role_id_dic = role_data.get(guild.id, {})
+
         for role_name in ROLE_NAMES_LIST:
             role = await ensure_role_exists(guild, role_name)
             role_id_dic[role.name] = role.id
-
+        role_data[guild.id] = role_id_dic
     save_role_ids(role_data)
 
 

@@ -113,6 +113,8 @@ class ReLinkCog(commands.Cog):
 
         for discord_id in list(users.keys()):
             lu = users.get(str(discord_id), {})
+            if lu:
+                continue
             if lu.get("resolved", False):
                 continue
 
