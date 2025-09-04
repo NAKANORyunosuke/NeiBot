@@ -9,39 +9,57 @@ DATA_DIR = os.path.join(PROJECT_ROOT, "venv")
 USERS_FILE = os.path.join(DATA_DIR, "all_users.json")
 TOKEN_FILE = os.path.join(DATA_DIR, "token.json")
 ROLE_FILE = os.path.join(DATA_DIR, "role_id.json")
+CHANNEL_FILE = os.path.join(DATA_DIR, "channel_id.json")
+CATEGORY_FILE = os.path.join(DATA_DIR, "category_id.json")
 JST = dt.timezone(dt.timedelta(hours=9))
 
 
-def load_role_ids() -> Dict[str, Any]:
-    if not os.path.exists(ROLE_FILE):
+def load_file(FILE_NAME):
+    if not os.path.exists(FILE_NAME):
         return {}
-    with open(ROLE_FILE, "r", encoding="utf-8") as f:
+    with open(FILE_NAME, "r", encoding="utf-8") as f:
         content = f.read().strip()
         if not content:
             return {}
         return json.loads(content)
 
 
-def save_role_ids(data: Dict[str, Any]):
-    os.makedirs(os.path.dirname(ROLE_FILE), exist_ok=True)
-    with open(ROLE_FILE, "w", encoding="utf-8") as f:
+def save_file(data, FILE_NAME) -> None:
+    os.makedirs(os.path.dirname(FILE_NAME), exist_ok=True)
+    with open(FILE_NAME, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False, default=str)
+
+
+def load_role_ids() -> Dict[str, Any]:
+    return load_file(ROLE_FILE)
+
+
+def save_role_ids(data: Dict[str, Any]) -> None:
+    save_file(data, ROLE_FILE)
+
+
+def load_channel_ids() -> Dict[str, Any]:
+    return load_file(CHANNEL_FILE)
+
+
+def save_channel_ids(data: Dict[str, Any]) -> None:
+    save_file(data, CHANNEL_FILE)
 
 
 def load_users() -> Dict[str, Any]:
-    if not os.path.exists(USERS_FILE):
-        return {}
-    with open(USERS_FILE, "r", encoding="utf-8") as f:
-        content = f.read().strip()
-        if not content:
-            return {}
-        return json.loads(content)
+    return load_file(USERS_FILE)
 
 
 def save_linked_users(data: Dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False, default=str)
+    save_file(data, USERS_FILE)
+
+
+def load_subscription_categories() -> Dict[str, Any]:
+    return load_file(CATEGORY_FILE)
+
+
+def save_subscription_categories(data: Dict[str, Any]) -> None:
+    save_file(data, CATEGORY_FILE)
 
 
 def get_guild_id():

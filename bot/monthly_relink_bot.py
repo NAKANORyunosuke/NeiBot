@@ -24,7 +24,6 @@ from apscheduler.triggers.cron import CronTrigger
 from bot.utils.save_and_load import (
     load_users,
     save_linked_users,
-    save_all_guild_members,
 )
 from bot.common import debug_print
 
