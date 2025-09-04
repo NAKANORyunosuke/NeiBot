@@ -241,7 +241,7 @@ async def ensure_role_exists(
     return role
 
 
-async def role_data(bot):
+async def make_subrole(bot):
     guilds = bot.guilds
 
     role_data = load_role_ids()
