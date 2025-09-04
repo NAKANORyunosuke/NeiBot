@@ -69,7 +69,11 @@ def mark_resolved(discord_id: str) -> None:
     既存のOAuthコールバックや検証処理から利用してください。
     """
     state = load_users()
-    state[str(discord_id)]["resolved"] = True
+    # ユーザーエントリが存在しない場合にも安全に更新
+    did = str(discord_id)
+    if did not in state or not isinstance(state.get(did), dict):
+        state[did] = {}
+    state[did]["resolved"] = True
     save_linked_users(state)
 
 
@@ -92,7 +96,10 @@ class ReLinkCog(commands.Cog):
         state = load_users()
 
         sent = 0
-        for discord_id in list(state.keys()):
+        # 値が辞書でない（誤って混入した）トップレベルキーを無視
+        for discord_id, user in list(state.items()):
+            if not isinstance(user, dict):
+                continue
             ok = await send_dm(
                 self.bot, int(discord_id), build_relink_message(discord_id)
             )
@@ -111,44 +118,49 @@ class ReLinkCog(commands.Cog):
         users = load_users()
         resend_cnt = 0
 
-        for discord_id in list(users.keys()):
-            lu = users.get(str(discord_id), {})
-            if lu:
+        # 値が辞書でない（誤って混入した）トップレベルキーを無視
+        for discord_id, lu in list(users.items()):
+            if not isinstance(lu, dict):
                 continue
             if lu.get("resolved", False):
                 continue
 
-            first_str = lu.get("first_notice_at", None)
-            if first_str is None:
+            last_str = lu.get("last_notice_at", None)
+            if last_str is None:
                 continue
 
             try:
-                first_at = dt.datetime.fromisoformat(first_str)
+                last_at = dt.datetime.fromisoformat(last_str)
+                if last_at.tzinfo is None:
+                    last_at = last_at.replace(tzinfo=JST)
             except Exception:
                 continue
-
             # 7日未満なら見送り
-            if (now - first_at).days < 7:
+            print(discord_id, lu)
+            if (now - last_at).days < 7:
                 continue
-
+            print((now - last_at).days)
             # 「当月に検証済み(last_verified_at)」なら解決扱い
-            if lu.get("last_verified_at", None) is not None:
+            if lu.get("last_verified_at", None):
                 try:
                     last_ver = dt.datetime.fromisoformat(lu["last_verified_at"])
+                    if last_ver.tzinfo is None:
+                        last_ver = last_ver.replace(tzinfo=JST)
                     if (last_ver.year == now.year) and (last_ver.month == now.month):
-                        users["resolved"] = True
+                        lu["resolved"] = True
                         continue
                 except Exception:
                     pass
             else:
-                users["resolved"] = False
+                lu["resolved"] = False
 
             ok = await send_dm(
                 self.bot, int(discord_id), build_relink_message(discord_id)
             )
             if ok:
-                users["last_notice_at"] = now.isoformat()
+                lu["last_notice_at"] = now.isoformat()
                 resend_cnt += 1
+            users[str(discord_id)] = lu
 
             await asyncio.sleep(0.5)
 
@@ -204,7 +216,12 @@ class ReLinkCog(commands.Cog):
     )
     async def relink_status(self, ctx: discord.ApplicationContext):
         state = load_users()
-        unresolved = [k for k, v in state.items() if not v.get("resolved", False)]
+        # 値が辞書のエントリのみ対象にし、安全に集計
+        unresolved = [
+            k
+            for k, v in state.items()
+            if isinstance(v, dict) and not v.get("resolved", False)
+        ]
         await ctx.respond(
             f"未解決ユーザー: {len(unresolved)}件\n"
             f"ユーザーID一覧（最大10件）: {', '.join(unresolved[:10]) if unresolved else 'なし'}",
