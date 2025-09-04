@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from bot.utils.save_and_load import *
+from bot.utils.save_and_load import load_users, save_all_guild_members
 
 
 class AutoLinkDM(commands.Cog):
@@ -14,6 +14,7 @@ class AutoLinkDM(commands.Cog):
 
         # 既にリンク済みならDM不要
         linked_users = load_users()
+        save_all_guild_members(self.bot)
         if discord_id in linked_users:
             return
 
