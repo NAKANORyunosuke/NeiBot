@@ -12,7 +12,11 @@ import httpx
 import os
 from bot.common import debug_print
 from bot.utils.streak import reconcile_and_save_link
-from bot.utils.save_and_load import *
+from bot.utils.save_and_load import (
+    get_broadcast_id,
+    get_twitch_keys,
+    save_all_guild_members,
+)
 from bot.utils.twitch import get_user_info_and_subscription
 
 # ==================== パス設定（絶対パス） ====================
@@ -41,12 +45,17 @@ def run_in_bot_loop(coro: Coroutine[Any, Any, Any]):
             f.result()
         except Exception as e:
             debug_print("❌ notify error:", repr(e))
+
     fut.add_done_callback(_done)
     return fut
 
 
 # ---- Bot側で実際に送信する処理（Botのループ上で動く）----
-async def notify_discord_user(discord_id: int, twitch_name: str, tier: str, streak: int | None = None):
+
+
+async def notify_discord_user(
+    discord_id: int, twitch_name: str, tier: str, streak: int | None = None
+):
     await bot.wait_until_ready()
     user = await bot.fetch_user(discord_id)
     if not user:
@@ -112,7 +121,9 @@ async def twitch_callback(request: Request):
         BROADCASTER_ID = str(broadcaster_id_raw)
         debug_print(f"[DEBUG] get_broadcast_id -> {BROADCASTER_ID!r}")
     except Exception as e:
-        return PlainTextResponse(f"Failed to resolve broadcaster_id: {e!r}", status_code=500)
+        return PlainTextResponse(
+            f"Failed to resolve broadcaster_id: {e!r}", status_code=500
+        )
 
     # 4) ユーザー情報 & サブスク情報（dict 返り値）
     try:
@@ -124,7 +135,9 @@ async def twitch_callback(request: Request):
     except httpx.HTTPError as e:
         return PlainTextResponse(f"Helix request failed: {e!r}", status_code=502)
     except Exception as e:
-        return PlainTextResponse(f"Failed to fetch user/sub info: {e!r}", status_code=500)
+        return PlainTextResponse(
+            f"Failed to fetch user/sub info: {e!r}", status_code=500
+        )
 
     twitch_user_name = info.get("twitch_username")
     if not twitch_user_name:
@@ -170,6 +183,11 @@ async def run_discord_bot():
     bot.load_extension("bot.cogs.auto_link_dm")
 
     await bot.start(token)
+
+
+async def on_ready(self):
+    print(f"login: {bot.user}")
+    save_all_guild_members(self.bot)
 
 
 if __name__ == "__main__":

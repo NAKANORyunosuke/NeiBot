@@ -80,10 +80,29 @@ pip install -r requirements.txt
    `venv/token.json` に以下を保存
 ```json
 {
-  "discord_token": "YOUR_DISCORD_BOT_TOKEN",
-  "twitch_client_id": "YOUR_TWITCH_CLIENT_ID",
-  "twitch_secret_key": "YOUR_TWITCH_SECRET_KEY",
-  "twitch_redirect_uri": "https://your.domain.com/twitch/callback"
+    "<discord_id>": {
+        "twitch_username": "Twitch のログイン名",
+        "twitch_user_id": "Twitch のユーザーID",
+
+        "tier": "1000|2000|3000|null",          // サブスクTier。未購読時は null
+        "is_subscriber": true | false,          // サブスク状態
+        "streak_months": <int>,                 // 連続購読月数
+        "cumulative_months": <int>,             // 累積購読月数
+
+        "bits_rank": <int|null>,                // Bitsリーダーボード順位
+        "bits_score": <int>,                    // Bits合計値
+
+        "linked_date": "YYYY-MM-DD",            // データ保存日
+
+        "resolved": true | false,               // 再リンクが解決済みか
+        "first_notice_at": "ISO8601 | null",    // 月初の通知日時
+        "last_notice_at": "ISO8601 | null",     // 最新の通知日時
+        "last_verified_at": "YYYY-MM-DD|null",  // 検証完了日
+
+        "dm_failed": true | false,              // DM送信失敗フラグ
+        "dm_failed_reason": "文字列|null"      // DM送信失敗の理由
+    },
+    ...
 }
 ```
 

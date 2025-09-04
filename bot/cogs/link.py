@@ -8,14 +8,15 @@ from discord.ext import commands  # tasksを使わないならtasksは不要
 from bot.utils.twitch import get_auth_url
 from bot.monthly_relink_bot import mark_resolved
 import os
-from bot.utils.save_and_load import *
+from bot.utils.save_and_load import load_role_ids, load_users, save_linked_users
 
 
 # ==== ロールID（あなたのサーバ設定） ====
-ROLE_TWITCH_LINKED = 1403053988991205509  # Twitch-linked
-ROLE_TIER1 = 1402175000252776491          # Subscription Tier1
-ROLE_TIER2 = 1402175113092136990          # Subscription Tier2
-ROLE_TIER3 = 1402175191802576926          # Subscription Tier3
+role_ids = load_role_ids()
+ROLE_TWITCH_LINKED = role_ids["ROLE_TWITCH_LINKED"]  # Twitch-linked
+ROLE_TIER1 = role_ids["ROLE_TIER1"]  # Subscription Tier1
+ROLE_TIER2 = role_ids["ROLE_TIER2"]  # Subscription Tier2
+ROLE_TIER3 = role_ids["ROLE_TIER3"]  # Subscription Tier3
 
 TIER_ROLE_MAP = {
     "1000": ROLE_TIER1,
@@ -44,18 +45,28 @@ class LinkCog(commands.Cog):
         tier_role_to_add = guild.get_role(TIER_ROLE_MAP.get(tier)) if tier else None
 
         # 付与対象ロール
-        roles_to_add = [r for r in (linked_role, tier_role_to_add) if r and r not in member.roles]
+        roles_to_add = [
+            r for r in (linked_role, tier_role_to_add) if r and r not in member.roles
+        ]
 
         # 除去対象（他Tierロール）
         current_role_ids = {r.id for r in member.roles}
-        tier_roles_to_remove = [guild.get_role(rid) for rid in ALL_TIER_ROLE_IDS if rid in current_role_ids]
-        tier_roles_to_remove = [r for r in tier_roles_to_remove if r and (tier_role_to_add is None or r.id != tier_role_to_add.id)]
+        tier_roles_to_remove = [
+            guild.get_role(rid) for rid in ALL_TIER_ROLE_IDS if rid in current_role_ids
+        ]
+        tier_roles_to_remove = [
+            r
+            for r in tier_roles_to_remove
+            if r and (tier_role_to_add is None or r.id != tier_role_to_add.id)
+        ]
 
         # 実行（権限・階層に注意）
         if roles_to_add:
             await member.add_roles(*roles_to_add, reason="Twitch link: add roles")
         if tier_roles_to_remove:
-            await member.remove_roles(*tier_roles_to_remove, reason="Twitch link: remove old tier")
+            await member.remove_roles(
+                *tier_roles_to_remove, reason="Twitch link: remove old tier"
+            )
 
     @discord.slash_command(
         name="link",
@@ -65,11 +76,15 @@ class LinkCog(commands.Cog):
         # スラッシュコマンドは必ず応答（ephemeral）
         discord_id = str(ctx.author.id)
         auth_url = get_auth_url(discord_id)
-        await ctx.respond(f"🔗 以下のリンクからTwitchと連携してください：\n{auth_url}", ephemeral=True)
+        await ctx.respond(
+            f"🔗 以下のリンクからTwitchと連携してください：\n{auth_url}", ephemeral=True
+        )
 
         # サーバ外で実行された場合、ロール付与はできないのでDMのみ
         if ctx.guild is None:
-            await ctx.author.send("⚠ このコマンドはサーバー内で実行してください。連携は可能ですがロール付与はできません。")
+            await ctx.author.send(
+                "⚠ このコマンドはサーバー内で実行してください。連携は可能ですがロール付与はできません。"
+            )
             return
 
         # ⏳ 連携完了を10秒ごとに最大60秒間ポーリング
@@ -86,7 +101,9 @@ class LinkCog(commands.Cog):
 
             # ロール付与（ギルド&メンバー解決）
             try:
-                member = ctx.guild.get_member(ctx.author.id) or await ctx.guild.fetch_member(ctx.author.id)
+                member = ctx.guild.get_member(
+                    ctx.author.id
+                ) or await ctx.guild.fetch_member(ctx.author.id)
             except discord.NotFound:
                 member = None
 
@@ -94,9 +111,13 @@ class LinkCog(commands.Cog):
                 try:
                     await self._ensure_roles_for_member(member, tier)
                 except discord.Forbidden:
-                    await ctx.author.send("⚠ Botにロール管理権限が不足しているため、ロール付与に失敗しました。管理者に連絡してください。")
+                    await ctx.author.send(
+                        "⚠ Botにロール管理権限が不足しているため、ロール付与に失敗しました。管理者に連絡してください。"
+                    )
                 except Exception as e:
-                    await ctx.author.send(f"⚠ ロール付与中にエラーが発生しました: {e!r}")
+                    await ctx.author.send(
+                        f"⚠ ロール付与中にエラーが発生しました: {e!r}"
+                    )
 
             mark_resolved(discord_id)
 
@@ -118,20 +139,22 @@ class LinkCog(commands.Cog):
             )
 
             try:
-                users[str(discord_id)]['dm_failed'] = False
+                users[str(discord_id)]["dm_failed"] = False
                 await ctx.author.send(msg)
             except discord.Forbidden:
-                users[str(discord_id)]['dm_failed'] = True
-                users[str(discord_id)]['dm_failed_reason'] = "DM拒否 (Forbidden)"
+                users[str(discord_id)]["dm_failed"] = True
+                users[str(discord_id)]["dm_failed_reason"] = "DM拒否 (Forbidden)"
             except discord.HTTPException as e:
-                users[str(discord_id)]['dm_failed'] = True
-                users[str(discord_id)]['dm_failed_reason'] = f"HTTPエラー: {e}"
+                users[str(discord_id)]["dm_failed"] = True
+                users[str(discord_id)]["dm_failed_reason"] = f"HTTPエラー: {e}"
             finally:
                 save_linked_users(users)
                 return
 
         # タイムアウト
-        await ctx.author.send("⏳ 60秒経っても連携が完了しませんでした。もう一度 `/link` をお試しください。")
+        await ctx.author.send(
+            "⏳ 60秒経っても連携が完了しませんでした。もう一度 `/link` をお試しください。"
+        )
 
 
 def setup(bot: commands.Bot):

@@ -21,7 +21,11 @@ from discord.ext import commands
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from bot.utils.save_and_load import *
+from bot.utils.save_and_load import (
+    load_users,
+    save_linked_users,
+    save_all_guild_members,
+)
 from bot.common import debug_print
 
 # ========= 定数・パス =========
@@ -90,7 +94,9 @@ class ReLinkCog(commands.Cog):
 
         sent = 0
         for discord_id in list(state.keys()):
-            ok = await send_dm(self.bot, int(discord_id), build_relink_message(discord_id))
+            ok = await send_dm(
+                self.bot, int(discord_id), build_relink_message(discord_id)
+            )
             if ok:
                 sent += 1
                 state[str(discord_id)]["first_notice_at"] = now.isoformat()
@@ -136,7 +142,9 @@ class ReLinkCog(commands.Cog):
             else:
                 users["resolved"] = False
 
-            ok = await send_dm(self.bot, int(discord_id), build_relink_message(discord_id))
+            ok = await send_dm(
+                self.bot, int(discord_id), build_relink_message(discord_id)
+            )
             if ok:
                 users["last_notice_at"] = now.isoformat()
                 resend_cnt += 1
@@ -149,8 +157,7 @@ class ReLinkCog(commands.Cog):
     # ===== イベントでスケジューラ起動 =====
     @commands.Cog.listener()
     async def on_ready(self):
-        save_all_guild_members(self.bot)
-        
+
         # 複数回 on_ready が来ても二重起動しないように
         if self._scheduler_started:
             return
@@ -174,19 +181,26 @@ class ReLinkCog(commands.Cog):
         debug_print("[scheduler] started")
 
     # ===== テスト用スラッシュコマンド =====
-    @discord.slash_command(name="force_relink", description="（テスト）今すぐ全員に再リンクDMを送ります")
+    @discord.slash_command(
+        name="force_relink", description="（テスト）今すぐ全員に再リンクDMを送ります"
+    )
     async def force_relink(self, ctx: discord.ApplicationContext):
         await ctx.respond("今から再リンクDMを送ります…", ephemeral=True)
         await self.notify_monthly_relink(force=True)
         await ctx.followup.send("送信が完了しました。", ephemeral=True)
 
-    @discord.slash_command(name="force_resend", description="（テスト）今すぐ『7日経過・未解決』へ再送します")
+    @discord.slash_command(
+        name="force_resend",
+        description="（テスト）今すぐ『7日経過・未解決』へ再送します",
+    )
     async def force_resend(self, ctx: discord.ApplicationContext):
         await ctx.respond("今から未解決ユーザーへ再送します…", ephemeral=True)
         await self.resend_after_7days_if_unlinked()
         await ctx.followup.send("再送が完了しました。", ephemeral=True)
 
-    @discord.slash_command(name="relink_status", description="（テスト）再リンク状態の要約を表示します")
+    @discord.slash_command(
+        name="relink_status", description="（テスト）再リンク状態の要約を表示します"
+    )
     async def relink_status(self, ctx: discord.ApplicationContext):
         state = load_users()
         unresolved = [k for k, v in state.items() if not v.get("resolved", False)]
