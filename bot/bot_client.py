@@ -10,9 +10,20 @@ from fastapi.responses import PlainTextResponse
 import uvicorn
 import httpx
 import os
+import re
 from bot.common import debug_print
 from bot.utils.streak import reconcile_and_save_link
-from bot.utils.save_and_load import *
+from bot.utils.save_and_load import (
+    get_broadcast_id,
+    get_twitch_keys,
+    save_all_guild_members,
+    load_role_ids,
+    save_role_ids,
+    save_channel_ids,
+    load_channel_ids,
+    load_subscription_categories,
+    save_subscription_categories,
+)
 from bot.utils.twitch import get_user_info_and_subscription
 
 # ==================== パス設定（絶対パス） ====================
@@ -21,7 +32,31 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "./"))
 TOKEN_PATH = os.path.join(PROJECT_ROOT, "venv", "token.json")
 USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "all_users.json")
 
-
+ROLE_NAMES_LIST = [
+    "Subscription Tier1",
+    "Subscription Tier2",
+    "Subscription Tier3",
+    "Twitch-linked",
+]
+CHANNEL_NAMES_LIST = [
+    "tier-1",
+    "tier-2",
+    "tier-3",
+]
+CATEGORY_NAMES = [
+    "サブスクTier 1",
+    "サブスクTier 2",
+    "サブスクTier 3",
+]
+CATEGORY_ROLE_MAP = {
+    CATEGORY_NAMES[j]: ROLE_NAMES_LIST[j] for j in range(len(CATEGORY_NAMES))
+}
+CHANNEL_ROLE_MAP = {
+    CHANNEL_NAMES_LIST[j]: ROLE_NAMES_LIST[j] for j in range(len(CATEGORY_NAMES))
+}
+CATEGORY_CHANNEL_MAP = {
+    CATEGORY_NAMES[j]: CHANNEL_NAMES_LIST[j] for j in range(len(CATEGORY_NAMES))
+}
 # ===== Discord Bot の準備 =====
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -41,12 +76,17 @@ def run_in_bot_loop(coro: Coroutine[Any, Any, Any]):
             f.result()
         except Exception as e:
             debug_print("❌ notify error:", repr(e))
+
     fut.add_done_callback(_done)
     return fut
 
 
 # ---- Bot側で実際に送信する処理（Botのループ上で動く）----
-async def notify_discord_user(discord_id: int, twitch_name: str, tier: str, streak: int | None = None):
+
+
+async def notify_discord_user(
+    discord_id: int, twitch_name: str, tier: str, streak: int | None = None
+):
     await bot.wait_until_ready()
     user = await bot.fetch_user(discord_id)
     if not user:
@@ -112,7 +152,9 @@ async def twitch_callback(request: Request):
         BROADCASTER_ID = str(broadcaster_id_raw)
         debug_print(f"[DEBUG] get_broadcast_id -> {BROADCASTER_ID!r}")
     except Exception as e:
-        return PlainTextResponse(f"Failed to resolve broadcaster_id: {e!r}", status_code=500)
+        return PlainTextResponse(
+            f"Failed to resolve broadcaster_id: {e!r}", status_code=500
+        )
 
     # 4) ユーザー情報 & サブスク情報（dict 返り値）
     try:
@@ -124,7 +166,9 @@ async def twitch_callback(request: Request):
     except httpx.HTTPError as e:
         return PlainTextResponse(f"Helix request failed: {e!r}", status_code=502)
     except Exception as e:
-        return PlainTextResponse(f"Failed to fetch user/sub info: {e!r}", status_code=500)
+        return PlainTextResponse(
+            f"Failed to fetch user/sub info: {e!r}", status_code=500
+        )
 
     twitch_user_name = info.get("twitch_username")
     if not twitch_user_name:
@@ -170,6 +214,139 @@ async def run_discord_bot():
     bot.load_extension("bot.cogs.auto_link_dm")
 
     await bot.start(token)
+
+
+@bot.event
+async def on_ready():
+    debug_print(f"login: {bot.user}")
+    save_all_guild_members(bot)
+    await make_subrole(bot)
+    await make_category_and_channel(bot)
+
+
+async def ensure_role_exists(
+    guild: discord.Guild,
+    role_name: str,
+    color: discord.Colour = discord.Colour.default(),
+):
+    # 既に存在しているかチェック
+    role = discord.utils.get(guild.roles, name=role_name)
+    if role is None:
+        debug_print(f"ロール「{role_name}」が存在しないため作成します")
+        role = await guild.create_role(
+            name=role_name, colour=color, reason="Twitchサブスク用自動作成"
+        )
+    else:
+        debug_print(f"ロール「{role_name}」は既に存在します")
+    return role
+
+
+async def make_subrole(bot):
+    guilds = bot.guilds
+
+    role_data = load_role_ids()
+
+    for guild in guilds:
+        role_id_dic = role_data.get(guild.id, {})
+        for role_name in ROLE_NAMES_LIST:
+            role = await ensure_role_exists(guild, role_name)
+            role_id_dic[role.name] = role.id
+
+    save_role_ids(role_data)
+
+
+async def ensure_text_channel_exists(
+    guild: discord.Guild,
+    channel_name: str,
+    overwrites: dict[discord.Role, discord.PermissionOverwrite] | None = None,
+    category: discord.CategoryChannel | None = None,
+    reason: str = "Twitchサブスク用自動生成",
+) -> discord.TextChannel:
+    channel = discord.utils.get(guild.text_channels, name=channel_name)
+    if channel is None:
+        debug_print(
+            f"チャンネル「{channel_name}」が存在しないため作成します in {guild.name}"
+        )
+        channel = await guild.create_text_channel(
+            name=channel_name, category=category, reason=reason, overwrites=overwrites
+        )
+    else:
+        debug_print(f"チャンネル「{channel_name}」はすでに存在します in {guild.name}")
+
+    return channel
+
+
+async def ensure_category_exists(
+    guild: discord.Guild,
+    category_name: str,
+    overwrites: dict[discord.Role, discord.PermissionOverwrite] | None = None,
+    reason: str = "Twitchサブスク用自動生成",
+) -> discord.CategoryChannel:
+    category = discord.utils.get(guild.categories, name=category_name)
+    if category is None:
+        debug_print(
+            f"カテゴリー「{category_name}」が存在しないため作成します in {guild.name}"
+        )
+        category = await guild.create_category(
+            name=category_name, reason=reason, overwrites=overwrites
+        )
+    else:
+        debug_print(f"カテゴリー「{category_name}」はすでに存在します in {guild.name}")
+
+    return category
+
+
+async def make_category_and_channel(bot):
+    guilds = bot.guilds
+    category_data = load_subscription_categories()
+    channel_data = load_channel_ids()
+    for guild in guilds:
+        everyone_role = guild.default_role
+        tier_role_dic = {
+            role_name: discord.utils.get(guild.roles, name=role_name)
+            for role_name in ROLE_NAMES_LIST
+        }
+        category_id_dic = category_data.get(guild.id, {})
+        channel_id_dic = channel_data.get(guild.id, {})
+
+        for category_name in CATEGORY_NAMES:
+            overwrites = {}
+            overwrites[everyone_role] = discord.PermissionOverwrite(view_channel=False)
+            for key, value in tier_role_dic.items():
+                subscriber_role = value
+                if re.search("3", key):
+                    # debug_print("DEBUG: ", key, category_name)
+                    overwrites[subscriber_role] = discord.PermissionOverwrite(
+                        view_channel=True
+                    )
+
+                if re.search("2", key) and re.search(r"[1,2]", category_name):
+                    # debug_print("DEBUG: ", key, category_name)
+                    overwrites[subscriber_role] = discord.PermissionOverwrite(
+                        view_channel=True
+                    )
+
+                if re.search("1", key) and re.search(r"1", category_name):
+                    # debug_print("DEBUG: ", key, category_name)
+                    overwrites[subscriber_role] = discord.PermissionOverwrite(
+                        view_channel=True
+                    )
+            # debug_print("DEBUG: ", overwrites)
+            category = await ensure_category_exists(guild, category_name, overwrites)
+            category_id_dic[CATEGORY_ROLE_MAP[category.name]] = category.id
+
+            channel = await ensure_text_channel_exists(
+                guild=guild,
+                channel_name=CATEGORY_CHANNEL_MAP[category.name],
+                overwrites=overwrites,
+                category=category,
+            )
+            channel_id_dic[CATEGORY_ROLE_MAP[category.name]] = channel.id
+
+        category_data[str(guild.id)] = category_id_dic
+        channel_data[str(guild.id)] = channel_id_dic
+    save_subscription_categories(category_data)
+    save_channel_ids(channel_data)
 
 
 if __name__ == "__main__":
