@@ -16,6 +16,8 @@ from bot.utils.save_and_load import (
     get_broadcast_id,
     get_twitch_keys,
     save_all_guild_members,
+    load_role_ids,
+    save_role_ids,
 )
 from bot.utils.twitch import get_user_info_and_subscription
 
@@ -24,7 +26,12 @@ from bot.utils.twitch import get_user_info_and_subscription
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "./"))
 TOKEN_PATH = os.path.join(PROJECT_ROOT, "venv", "token.json")
 USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "all_users.json")
-
+ROLE_NAME_MAPPING = {
+    "Twitch-linked": "ROLE_TWITCH_LINKED",
+    "Subscription Tier1": "ROLE_TIER1",
+    "Subscription Tier2": "ROLE_TIER2",
+    "Subscription Tier3": "ROLE_TIER3",
+}
 
 # ===== Discord Bot の準備 =====
 intents = discord.Intents.all()
@@ -185,9 +192,47 @@ async def run_discord_bot():
     await bot.start(token)
 
 
-async def on_ready(self):
+@bot.event
+async def on_ready():
     print(f"login: {bot.user}")
-    save_all_guild_members(self.bot)
+    save_all_guild_members(bot)
+    await make_subrole(bot)
+
+
+async def ensure_role_exists(
+    guild: discord.Guild,
+    role_name: str,
+    color: discord.Colour = discord.Colour.default(),
+):
+    # 既に存在しているかチェック
+    role = discord.utils.get(guild.roles, name=role_name)
+    if role is None:
+        print(f"ロール「{role_name}」が存在しないため作成します")
+        role = await guild.create_role(
+            name=role_name, colour=color, reason="Twitchサブスク用自動作成"
+        )
+    else:
+        print(f"ロール「{role_name}」は既に存在します")
+    return role
+
+
+async def make_subrole(bot):
+    guilds = bot.guilds
+    role_names = [
+        "Subscription Tier1",
+        "Subscription Tier2",
+        "Subscription Tier3",
+        "Twitch-linked",
+    ]
+    role_data = load_role_ids()
+
+    for guild in guilds:
+        role_id_dic = {}
+        for role_name in role_names:
+            role = await ensure_role_exists(guild, role_name)
+            role_id_dic[ROLE_NAME_MAPPING[role.name]] = role.id
+        role_data[guild.id] = role_id_dic
+    save_role_ids(role_data)
 
 
 if __name__ == "__main__":
