@@ -195,6 +195,22 @@ def get_eventsub_config() -> Tuple[str, str]:
     return callback, secret
 
 
+def get_admin_api_token() -> Optional[str]:
+    """Read admin API token from token.json (key: "admin_api_token")."""
+    if not os.path.exists(TOKEN_FILE):
+        return None
+    try:
+        with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        token = data.get("admin_api_token")
+        if token is None:
+            return None
+        token_str = str(token).strip()
+        return token_str or None
+    except Exception:
+        return None
+
+
 __all__ = [
     name
     for name, obj in globals().items()

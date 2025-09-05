@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <title>ロールDM送信</title>
+  </head>
+  <body>
+    <h1>ロールDM送信</h1>
+    <p><a href="/">トップ</a></p>
+    {% if messages %}
+      <ul>
+      {% for m in messages %}
+        <li>{{ m }}</li>
+      {% endfor %}
+      </ul>
+    {% endif %}
+    {% if user.is_authenticated %}
+      {% if user.is_staff %}
+        <form method="post" enctype="multipart/form-data">
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+            <ul style="color:#c00;">
+              {% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}
+            </ul>
+          {% endif %}
+          <div>
+            <label for="id_guild_id">サーバー</label>
+            {{ form.guild_id }}
+            <button type="submit" name="refresh" value="1">サーバーを反映</button>
+            {{ form.guild_id.errors }}
+          </div>
+          <div>
+            <label for="id_role_id">ロール</label>
+            {{ form.role_id }}
+            {{ form.role_id.errors }}
+          </div>
+          <div>
+            <label for="id_message">メッセージ</label>
+            {{ form.message }}
+            {{ form.message.errors }}
+          </div>
+          <div>
+            <label for="id_attachment">添付ファイル</label>
+            {{ form.attachment }}
+            {{ form.attachment.errors }}
+          </div>
+          <button type="submit">送信</button>
+        </form>
+      {% else %}
+        <p>このページへアクセスする権限がありません。</p>
+      {% endif %}
+    {% else %}
+      <p><a href="/accounts/twitch/login/">Twitchでログイン</a></p>
+    {% endif %}
+  </body>
+  </html>

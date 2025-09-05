@@ -9,3 +9,21 @@ NeiBot.zip
 zip_for_ChatGPT.bat
 .vscode
 icon.png
+
+.png
+.ico
+.jpg
+.jpeg
+.gif
+.DS_Store
+
+# Django media/uploads (downloaded/attached files)
+webadmin/media/
+
+# Django collected static (if used)
+webadmin/static/
+
+# Logs / temp
+*.log
+*.tmp
+*.temp

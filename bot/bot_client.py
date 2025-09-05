@@ -16,6 +16,8 @@ from bot.utils.streak import reconcile_and_save_link
 from bot.utils.save_and_load import (
     get_broadcast_id,
     get_twitch_keys,
+    get_guild_id,
+    get_admin_api_token,
     save_all_guild_members,
     load_role_ids,
     save_role_ids,
@@ -23,6 +25,7 @@ from bot.utils.save_and_load import (
     load_channel_ids,
     load_subscription_categories,
     save_subscription_categories,
+    get_admin_api_token,
 )
 from bot.utils.twitch import (
     get_user_info_and_subscription,
@@ -32,6 +35,7 @@ from bot.utils.save_and_load import load_users, save_linked_users, get_eventsub_
 import hmac
 import hashlib
 import datetime as dt
+import io
 
 # ==================== パス設定（絶対パス） ====================
 
@@ -68,6 +72,7 @@ CATEGORY_CHANNEL_MAP = {
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 JST = zoneinfo.ZoneInfo("Asia/Tokyo")
+BOT_LOOP = None  # will be captured in on_ready()
 
 # ===== FastAPI アプリ =====
 app = FastAPI()
@@ -83,6 +88,29 @@ def run_in_bot_loop(coro: Coroutine[Any, Any, Any]):
             f.result()
         except Exception as e:
             debug_print("❌ notify error:", repr(e))
+
+    fut.add_done_callback(_done)
+    return fut
+
+def schedule_in_bot_loop(coro: Coroutine[Any, Any, Any]):
+    """Safely schedule a coroutine onto the Discord bot loop with logs."""
+    try:
+        name = getattr(coro, "__name__", None) or str(coro)
+    except Exception:
+        name = str(coro)
+    loop = BOT_LOOP or getattr(bot, "loop", None)
+    if loop is None:
+        debug_print(f"[loop] no bot loop available; cannot schedule {name}")
+        return None
+    debug_print(f"[loop] scheduling on {loop}: {name}")
+    fut = asyncio.run_coroutine_threadsafe(coro, loop)
+
+    def _done(f):
+        try:
+            f.result()
+            debug_print("[loop] task completed successfully")
+        except Exception as e:
+            debug_print("[loop] task error:", repr(e))
 
     fut.add_done_callback(_done)
     return fut
@@ -105,10 +133,172 @@ async def notify_discord_user(
     await user.send(msg)
 
 
+async def _send_dm(
+    user: discord.User | discord.Member, message: str, file_url: str | None = None
+):
+    try:
+        debug_print(
+            f"[DM] start -> user={getattr(user,'id','?')} has_file={bool(file_url)} msg_len={(len(message or ''))}"
+        )
+        if file_url:
+            async with httpx.AsyncClient(timeout=20) as client:
+                debug_print(f"[DM] downloading attachment: {file_url}")
+                r = await client.get(file_url)
+                r.raise_for_status()
+                buf = io.BytesIO(r.content)
+                debug_print(
+                    f"[DM] downloaded: status={r.status_code} bytes={len(r.content)}"
+                )
+            filename = file_url.rsplit("/", 1)[-1] or "attachment"
+            await user.send(content=(message or None), file=discord.File(buf, filename))
+            debug_print(
+                f"[DM] sent with file -> user={getattr(user,'id','?')} {filename}"
+            )
+        else:
+            await user.send(content=message)
+            debug_print(f"[DM] sent text -> user={getattr(user,'id','?')}")
+    except Exception as e:
+        debug_print(f"[DM] failed to {getattr(user, 'id', '?')}: {e!r}")
+
+
+async def notify_role_members(
+    role_id: int,
+    message: str,
+    file_url: str | None = None,
+    guild_id: int | None = None,
+):
+    await bot.wait_until_ready()
+    debug_print(
+        f"[/send_role_dm] begin notify_role_members role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} has_file={bool(file_url)}"
+    )
+    guild: discord.Guild | None = None
+    if guild_id is not None:
+        guild = bot.get_guild(int(guild_id))
+    if guild is None:
+        # Try to find the guild that contains this role id
+        for g in bot.guilds:
+            if g.get_role(int(role_id)) is not None:
+                guild = g
+                break
+    if guild is None:
+        # Fallback to configured guild
+        try:
+            gid = get_guild_id()
+            guild = bot.get_guild(int(gid))
+        except Exception:
+            guild = None
+    if guild is None:
+        debug_print(f"[DM] guild not found for role {role_id}")
+        return
+    role = guild.get_role(int(role_id))
+    if role is None:
+        debug_print(f"[DM] role {role_id} not found in {guild.name}")
+        return
+    members = list(role.members)
+    debug_print(
+        f"[DM] target guild={guild.id}({guild.name}) role={role.id}({role.name}) members={len(members)}"
+    )
+    for m in members:
+        if m.bot:
+            continue
+        await _send_dm(m, message, file_url)
+        await asyncio.sleep(0.3)
+    debug_print(
+        f"[/send_role_dm] done for role_id={role_id} guild_id={getattr(guild,'id',None)}"
+    )
+
+
 # ---- API: 直接Discordに通知する（外部/内部から叩ける）----
 @app.post("/notify_link")
 async def notify_link(discord_id: int, twitch_name: str, tier: str):
-    run_in_bot_loop(notify_discord_user(discord_id, twitch_name, tier))
+    schedule_in_bot_loop(notify_discord_user(discord_id, twitch_name, tier))
+    return {"status": "queued"}
+
+
+# ===== 管理API: ロール一覧とロールDMキュー =====
+ADMIN_API_TOKEN = get_admin_api_token()
+
+
+def _require_admin_token(auth_header: str | None) -> bool:
+    if not ADMIN_API_TOKEN:
+        debug_print("[ADMIN] token check: server-side token missing (reject)")
+        return False
+    if not auth_header:
+        debug_print("[ADMIN] token check: Authorization header missing (reject)")
+        return False
+    try:
+        scheme, token = auth_header.split(" ", 1)
+    except ValueError:
+        debug_print("[ADMIN] token check: malformed Authorization header (reject)")
+        return False
+    ok = scheme.lower() == "bearer" and token.strip() == ADMIN_API_TOKEN
+    debug_print(f"[ADMIN] token check: {'ok' if ok else 'reject'}")
+    return ok
+
+
+@app.get("/guilds")
+async def list_guilds(authorization: str | None = Header(None, alias="Authorization")):
+    if not _require_admin_token(authorization):
+        return PlainTextResponse("forbidden", status_code=403)
+    await bot.wait_until_ready()
+    guilds = [
+        {"id": g.id, "name": g.name}
+        for g in sorted(bot.guilds, key=lambda x: x.name.lower())
+    ]
+    debug_print(f"[/guilds] return {len(guilds)} guild(s)")
+    return {"guilds": guilds}
+
+
+@app.get("/roles")
+async def list_roles(
+    authorization: str | None = Header(None, alias="Authorization"),
+    guild_id: int | None = None,
+):
+    if not _require_admin_token(authorization):
+        return PlainTextResponse("forbidden", status_code=403)
+    await bot.wait_until_ready()
+    guild: discord.Guild | None = None
+    if guild_id is not None:
+        guild = bot.get_guild(int(guild_id))
+    if guild is None:
+        try:
+            gid = get_guild_id()
+            guild = bot.get_guild(int(gid))
+        except Exception:
+            guild = None
+    if guild is None:
+        debug_print(f"[/roles] guild not found (guild_id={guild_id}) -> []")
+        return JSONResponse({"roles": []})
+    roles = [
+        {"id": r.id, "name": r.name}
+        for r in sorted(guild.roles, key=lambda x: x.position, reverse=True)
+        if r.name != "@everyone"
+    ]
+    debug_print(f"[/roles] guild={guild.id}({guild.name}) roles={len(roles)}")
+    return {"roles": roles}
+
+
+@app.post("/send_role_dm")
+async def send_role_dm(
+    request: Request,
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    if not _require_admin_token(authorization):
+        return PlainTextResponse("forbidden", status_code=403)
+    payload = await request.json()
+    role_id = int(payload.get("role_id"))
+    message = str(payload.get("message") or "")
+    file_url = payload.get("file_url")
+    guild_id = payload.get("guild_id")
+    debug_print(
+        f"[/send_role_dm] payload role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} has_file={bool(file_url)}"
+    )
+    schedule_in_bot_loop(
+        notify_role_members(
+            role_id, message, file_url, int(guild_id) if guild_id else None
+        )
+    )
+    debug_print("[/send_role_dm] queued notify task")
     return {"status": "queued"}
 
 
@@ -191,7 +381,7 @@ async def twitch_callback(request: Request):
 
     # 6) Discord通知
     try:
-        run_in_bot_loop(
+        schedule_in_bot_loop(
             notify_discord_user(
                 int(state),
                 rec.get("twitch_username"),
@@ -348,6 +538,13 @@ async def run_discord_bot():
 @bot.event
 async def on_ready():
     debug_print(f"login: {bot.user}")
+    # Capture running loop for cross-thread scheduling
+    try:
+        global BOT_LOOP
+        BOT_LOOP = asyncio.get_running_loop()
+        debug_print(f"[loop] captured: {BOT_LOOP}")
+    except Exception as e:
+        debug_print(f"[loop] capture failed: {e!r}")
     save_all_guild_members(bot)
     await make_subrole(bot)
     await make_category_and_channel(bot)
@@ -483,6 +680,51 @@ async def make_category_and_channel(bot):
     save_subscription_categories(category_data)
     save_channel_ids(channel_data)
 
+
+def start_django_admin():
+    """Run Django admin panel (webadmin) on 127.0.0.1:8001 for debugging.
+
+    Starts a child process for `python webadmin/manage.py runserver` and
+    registers an atexit hook to terminate it when this process exits.
+    Controlled via env RUN_DJANGO (truthy to enable).
+    """
+    try:
+        import sys, subprocess, atexit, os as _os
+
+        # PROJECT_ROOT points to .../bot, repo root is parent
+        repo_root = _os.path.abspath(_os.path.join(PROJECT_ROOT, ".."))
+        manage_py = _os.path.join(repo_root, "webadmin", "manage.py")
+        if not _os.path.exists(manage_py):
+            debug_print(f"[Django] manage.py not found at {manage_py}; skip starting.")
+            return
+
+        env = _os.environ.copy()
+        env.setdefault("BOT_ADMIN_API_BASE", "http://127.0.0.1:8000")
+        # ADMIN_API_TOKEN は必要に応じてこのプロセスの環境から継承してください
+
+        args = [sys.executable, manage_py, "runserver", "127.0.0.1:8001"]
+        proc = subprocess.Popen(args, cwd=_os.path.dirname(manage_py), env=env)
+        debug_print("[Django] runserver started on http://127.0.0.1:8001")
+
+        def _stop():
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+            except Exception:
+                try:
+                    if proc.poll() is None:
+                        proc.kill()
+                except Exception:
+                    pass
+
+        atexit.register(_stop)
+    except Exception as e:
+        debug_print(f"[Django] failed to start: {e!r}")
+
+
+# RUN_DJANGO=1 なら Django 管理画面を並行起動（デバッグ用）
+if os.getenv("RUN_DJANGO", "").strip() not in ("", "0", "false", "False"):
+    start_django_admin()
 
 if __name__ == "__main__":
     # FastAPI を別スレッドで開始（独自ループ）
