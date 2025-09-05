@@ -1,169 +1,189 @@
-# Twitchサブスク連携Discord Bot - NeiBot
+# NeiBot – Twitch サブスク連携 Discord Bot
 
-![Python](https://img.shields.io/badge/Python-3.12-blue)  
-![py-cord](https://img.shields.io/badge/py--cord-2.6.1-green)  
-![twitchAPI](https://img.shields.io/badge/twitchAPI-4.5.0-purple)  
+![Python](https://img.shields.io/badge/Python-3.12-blue)
+![py-cord](https://img.shields.io/badge/py--cord-2.6.1-green)
 
-Twitch サブスク状況を自動判定し、Discord ロールの付与 / 剥奪を行う Bot です。  
-OAuth2 により Twitch アカウントと Discord アカウントをリンクし、Tier に応じてロールを割り当てます。  
+Twitch サブスク状況に応じて Discord 側のロール・チャンネル権限を自動管理する Bot です。/link による OAuth 連携、月次の再リンク DM、Twitch EventSub(Webhook) による再サブ情報の自動反映に対応しています。
 
 ---
 
 ## 主な機能
 
-- **Twitch連携**
-  - Twitch OAuth2 によるアカウントリンク  
-  - Helix API を利用したサブスク Tier 情報の取得  
-
-- **Discord連携**
-  - サブスク Tier に応じたロール付与 / 剥奪  
-  - サーバー参加時の DM によるリンク催促  
-  - 月初に「再リンク催促」フラグを立て、未更新ユーザーに通知  
-
-- **Web管理 (FastAPI)**
-  - OAuth コールバック処理  
-  - リンク状態確認用のエンドポイント  
-
-- **運用環境**
-  - Windows Server 上で常時稼働  
-  - Nginx によるリバースプロキシ  
-  - Let’s Encrypt (win-acme) による SSL 化  
+- Twitch 連携: `/link` で視聴者 OAuth。配信者トークンで補助情報を取得。
+- サブ情報の保存: `streak_months`(連続) / `cumulative_months`(累計) / `subscribed_since`(開始日) / `tier` を保存。
+- EventSub(Webhook): `channel.subscribe`/`channel.subscription.message`/`channel.subscription.end` を受信し、自動更新。
+- 月次リマインド: 月初に全員へ再リンク DM、7日経過で未解決へ再送。
+- ロール管理: 連携ロールと Tier ロールを付与/整理。サブ専用カテゴリー/チャンネルも自動整備。
 
 ---
 
-## 技術スタック
+## 構成
 
-- **言語:** Python 3.12  
-- **主要ライブラリ:**  
-  - [py-cord 2.6.1](https://github.com/Pycord-Development/pycord)  
-  - [twitchAPI 4.5.0](https://github.com/Teekeks/pyTwitchAPI)  
-  - [FastAPI](https://fastapi.tiangolo.com/)  
-- **利用 API:** Twitch Helix API, Discord API  
-- **インフラ:** Windows Server, Nginx, win-acme  
-
----
-
-## 処理フロー
-
-```mermaid
-flowchart LR
-    U[ユーザー] -->|Discord参加| D[Discordサーバー]
-    D -->|/link 実行| O[OAuth URL発行]
-    O --> B[ブラウザでTwitch認証]
-    B --> F[FastAPIコールバック]
-    F -->|サブスクTier取得| T[Twitch Helix API]
-    F -->|ロール付与| D
-```
+- Discord Bot: `bot/bot_client.py`（py-cord）
+  - ロードする拡張: `bot.cogs.link`, `bot.cogs.unlink`(任意), `bot.monthly_relink_bot`, `bot.cogs.auto_link_dm`
+- FastAPI: `GET /twitch_callback`, `POST /twitch_eventsub`
+  - 起動時に EventSub を App Access Token で登録
+- スケジューラ: APScheduler（JST）
+  - 月初 09:05 初回通知／毎日 09:10 未解決再送
 
 ---
 
-## セットアップ手順（ローカル開発環境）
+## セットアップ
 
-1. **リポジトリをクローン**
-```bash
-git clone https://github.com/NAKANORyunosuke/NeiBot.git
-cd NeiBot
-```
+1) 依存インストール
 
-2. **仮想環境作成**
 ```bash
 python -m venv venv
 venv\Scripts\activate
+pip install -r requirement.txt
 ```
 
-3. **依存パッケージのインストール**
-```bash
-pip install -r requirements.txt
-```
+2) `venv/token.json` を作成
 
-4. **認証情報を設定**  
-   `venv/token.json` に以下を保存
 ```json
 {
-    "<discord_id>": {
-        "twitch_username": "Twitch のログイン名",
-        "twitch_user_id": "Twitch のユーザーID",
+  "discord_token": "<Discord Bot Token>",
+  "guild_id": 123456789012345678,
 
-        "tier": "1000|2000|3000|null",          // サブスクTier。未購読時は null
-        "is_subscriber": true | false,          // サブスク状態
-        "streak_months": <int>,                 // 連続購読月数
-        "cumulative_months": <int>,             // 累積購読月数
+  "twitch_client_id": "<Twitch Client ID>",
+  "twitch_secret_key": "<Twitch Client Secret>",
+  "twitch_redirect_uri": "https://your.domain/twitch_callback",
 
-        "bits_rank": <int|null>,                // Bitsリーダーボード順位
-        "bits_score": <int>,                    // Bits合計値
-
-        "linked_date": "YYYY-MM-DD",            // データ保存日
-
-        "resolved": true | false,               // 再リンクが解決済みか
-        "first_notice_at": "ISO8601 | null",    // 月初の通知日時
-        "last_notice_at": "ISO8601 | null",     // 最新の通知日時
-        "last_verified_at": "YYYY-MM-DD|null",  // 検証完了日
-
-        "dm_failed": true | false,              // DM送信失敗フラグ
-        "dm_failed_reason": "文字列|null"      // DM送信失敗の理由
-    },
-    ...
+  "twitch_access_token": "<Broadcaster User Access Token>",
+  "twitch_id": "<Broadcaster User ID>"
 }
 ```
 
-5. **Bot & APIサーバー起動**
+必須スコープ
+- 視聴者 OAuth(リンク用): `user:read:subscriptions`
+- 配信者ユーザートークン(補助取得/任意): `channel:read:subscriptions`（Bits を使う場合は `bits:read`）
+
+3) 起動
+
 ```bash
 python bot/bot_client.py
 ```
 
+環境変数 `DEBUG=1` で詳細ログを出力します。
+
 ---
 
-## 本番環境構築（Windows Server + Nginx + win-acme）
+## EventSub(Webhook) 設定
 
-### 1. Python環境の準備
+- コールバック URL: `twitch_redirect_uri` のホストを使い、`/twitch_eventsub` に自動変換（例: `https://your.domain/twitch_eventsub`）
+- 署名 secret: `twitch_secret_key` を使用（環境変数で上書き可）
+- 要件: HTTPS/標準ポート(443) 必須。ローカル開発では ngrok 等で公開してください。
+
+起動時ログ
+- 202: 登録受理
+- 409: 既に登録済み（問題なし）
+- `webhook_callback_verification` に対して challenge を 200 で返答します。
+
+ngrok 例
+
+```bash
+ngrok http 8000
+# token.json の twitch_redirect_uri を https://<ngrok>.ngrok-free.app/twitch_callback に変更
+# Twitch 開発コンソールの Redirect URL にも同値を登録
+```
+
+---
+
+## スラッシュコマンド
+
+- `/link`: Twitch 連携を開始。完了後、Twitch名/サブ状態/Tier/連続・累計・開始日を DM で通知。
+- `/force_relink`: 全員へ再リンク DM（テスト）
+- `/force_resend`: 「7日経過・未解決」へ再送（テスト）
+- `/relink_status`: 未解決ユーザー数の要約（テスト）
+
+---
+
+## データ保存（`venv/all_users.json`）
+
+主なキー
+- `twitch_username`, `twitch_user_id`
+- `tier`("1000"|"2000"|"3000"|null), `is_subscriber`
+- `streak_months`, `cumulative_months`, `subscribed_since`
+- `linked_date`, `last_verified_at`
+- `first_notice_at`, `last_notice_at`, `resolved`
+
+備考
+- `streak_months` は毎月の検証日と EventSub をもとに更新。
+- `cumulative_months` は EventSub(subscription.message) を最優先。未着の場合は自前ロジックで増分。
+- `linked_date` は /link 完了時に上書き更新。
+
+---
+
+## よくある質問 / トラブルシュート
+
+- EventSub 登録が 400: callback は HTTPS/443 のみ許可。ngrok の https を使用。
+- EventSub 登録が 400(認可エラー): 作成は App Access Token 必須（実装済み）。
+- Bits が 401/403: トークン/スコープ不足。以後は自動スキップ（ログ1回）。
+- Webhook が来ない: ngrok URL 変更時は `twitch_redirect_uri` と Twitch 側設定を更新。ユーザーは /link 済みかを確認（未リンクは無視）。
+
+---
+
+## 本番環境（Nginx）
+
+Windows Server + Nginx + win-acme での構成例です。既存の運用はこの形を想定しています。
+
+1) Python/依存パッケージ
+
 ```powershell
 winget install Python.Python.3.12
 python -m venv venv
 venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirement.txt
 ```
 
-### 2. Nginxのインストール
+2) Nginx のセットアップ（Chocolatey 例）
+
 ```powershell
 choco install nginx
 ```
-Nginx設定ファイル例（`C:\tools\nginx\conf\nginx.conf`）：
+
+3) HTTP→HTTPS リダイレクト（任意）
+
 ```nginx
 server {
     listen 80;
     server_name your.domain.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
+    return 301 https://$host$request_uri;
 }
 ```
 
-### 3. SSL証明書の取得（win-acme）
-1. [win-acme公式サイト](https://www.win-acme.com/)からバイナリをダウンロード  
-2. 実行して `N`（新規証明書作成）を選択  
-3. ドメインを入力し、自動で証明書を取得  
-4. Nginx設定に追記：
+4) HTTPS リバースプロキシ（FastAPI→127.0.0.1:8000）
+
 ```nginx
 server {
-    listen 443 ssl;
+    listen 443 ssl http2;
     server_name your.domain.com;
 
+    # win-acme で取得した証明書パスに置き換えてください
     ssl_certificate     "C:/ProgramData/win-acme/httpsacme-v02.api.letsencrypt.org/acme-v02.pem";
     ssl_certificate_key "C:/ProgramData/win-acme/httpsacme-v02.api.letsencrypt.org/acme-v02-key.pem";
 
+    # すべて FastAPI(Uvicorn) にプロキシ
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 600s;
     }
 }
 ```
 
-### 4. Botの常時稼働
-Windowsのタスクスケジューラで以下を登録：
+5) 設定上の注意
+
+- `twitch_redirect_uri` は本番の HTTPS ドメインで `/twitch_callback` を指す必要があります（例: `https://your.domain.com/twitch_callback`）。
+- EventSub のコールバックは自動で `https://your.domain.com/twitch_eventsub` になります（内部実装で `twitch_redirect_uri` から生成）。
+- Twitch の開発者コンソールに「OAuth Redirect URLs」として `twitch_redirect_uri` を登録してください。
+- Uvicorn は 8000 番で動作（`python bot/bot_client.py`）。Nginx が 443/80 を受け、Uvicorn にプロキシします。
+
+6) 常時稼働（例: タスクスケジューラ）
+
 ```powershell
 cd C:\path\to\NeiBot
 venv\Scripts\activate
@@ -172,30 +192,6 @@ python bot/bot_client.py
 
 ---
 
-## ディレクトリ構成
-
-```
-NeiBot/
-├─ bot/                # Bot本体
-│   ├─ bot_client.py   # Discord Botエントリーポイント
-│   ├─ utils/          # 共通処理
-│   └─ cogs/           # コマンド機能
-├─ venv/               # 仮想環境 & 認証情報
-└─ requirements.txt
-```
-
----
-
-## 今後の拡張予定
-- サブスク期限切れチェックの自動化  
-- 一斉DM送信機能  
-- ログ分析による不正アクセス検知  
-
----
-
 ## ライセンス
 
-このプロジェクトは **商用利用禁止ライセンス（Non-Commercial License）** の下で公開されています。  
-個人利用・学術研究・教育目的での利用は自由ですが、商用利用（販売・有料サービスへの組込み等）は禁止されています。  
-
-詳細は [LICENSE](./LICENSE) ファイルをご確認ください。
+このプロジェクトは **商用利用禁止ライセンス（Non-Commercial License）** の下で公開されています。詳細は [LICENSE](./LICENSE) を参照してください。
