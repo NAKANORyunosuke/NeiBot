@@ -77,7 +77,15 @@ JST = zoneinfo.ZoneInfo("Asia/Tokyo")
 BOT_LOOP = None  # will be captured in on_ready()
 
 # ===== FastAPI アプリ =====
-app = FastAPI()
+IS_PROD = (os.getenv("APP_ENV") or os.getenv("ENV") or "").lower() in (
+    "prod",
+    "production",
+)
+app = FastAPI(
+    docs_url=None if IS_PROD else "/docs",
+    redoc_url=None if IS_PROD else "/redoc",
+    openapi_url=None if IS_PROD else "/openapi.json",
+)
 
 
 # ---- Bot ループにコルーチンを投げる小ヘルパ ----
@@ -225,7 +233,14 @@ async def notify_role_members(
 
 # ---- API: 直接Discordに通知する（外部/内部から叩ける）----
 @app.post("/notify_link")
-async def notify_link(discord_id: int, twitch_name: str, tier: str):
+async def notify_link(
+    discord_id: int,
+    twitch_name: str,
+    tier: str,
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    if not _require_admin_token(authorization):
+        return PlainTextResponse("forbidden", status_code=403)
     schedule_in_bot_loop(notify_discord_user(discord_id, twitch_name, tier))
     return {"status": "queued"}
 
@@ -545,7 +560,7 @@ async def twitch_eventsub(
 
 # ===== FastAPI を別スレッドで起動 =====
 def start_api():
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
 
 
 # ===== Discord Bot を起動 =====
@@ -746,9 +761,11 @@ def start_django_admin():
     except Exception as e:
         debug_print(f"[Django] failed to start: {e!r}")
 
+
 # ---- メッセージ中のプレースホルダ検証 ----
 ALLOWED_PLACEHOLDERS = {"user"}
 PLACEHOLDER_RE = re.compile(r"(?<!\{)\{([^\{\}]+)\}(?!\})")
+
 
 def _unknown_placeholders(msg: str | None) -> list[str]:
     text = msg or ""
