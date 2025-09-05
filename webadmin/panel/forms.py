@@ -1,6 +1,7 @@
 from django import forms
 from django.conf import settings
 import requests
+import re
 
 
 class RoleBroadcastForm(forms.Form):
@@ -11,6 +12,8 @@ class RoleBroadcastForm(forms.Form):
 
     # 8MB 上限（Discord DM の添付上限）
     MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+    ALLOWED_PLACEHOLDERS = {"user"}
+    PLACEHOLDER_RE = re.compile(r"(?<!\{)\{([^\{\}]+)\}(?!\})")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -61,3 +64,18 @@ class RoleBroadcastForm(forms.Form):
             raise forms.ValidationError("添付ファイルは8MB以下にしてください。")
         return f
 
+    def clean_message(self):
+        msg = self.cleaned_data.get("message") or ""
+        # Validate placeholders like {user}; reject unknown ones
+        unknown: list[str] = []
+        for m in self.PLACEHOLDER_RE.finditer(msg):
+            key = (m.group(1) or "").strip().lower()
+            if key not in self.ALLOWED_PLACEHOLDERS:
+                unknown.append(m.group(1).strip())
+        if unknown:
+            allowed = ", ".join(sorted(self.ALLOWED_PLACEHOLDERS))
+            uniq_unknown = ", ".join(sorted({u for u in unknown}))
+            raise forms.ValidationError(
+                f"不明なプレースホルダがあります: {uniq_unknown}（使用可能: {allowed}）"
+            )
+        return msg

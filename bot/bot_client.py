@@ -11,6 +11,9 @@ import uvicorn
 import httpx
 import os
 import re
+import sys
+import subprocess
+import atexit
 from bot.common import debug_print
 from bot.utils.streak import reconcile_and_save_link
 from bot.utils.save_and_load import (
@@ -25,7 +28,6 @@ from bot.utils.save_and_load import (
     load_channel_ids,
     load_subscription_categories,
     save_subscription_categories,
-    get_admin_api_token,
 )
 from bot.utils.twitch import (
     get_user_info_and_subscription,
@@ -92,6 +94,7 @@ def run_in_bot_loop(coro: Coroutine[Any, Any, Any]):
     fut.add_done_callback(_done)
     return fut
 
+
 def schedule_in_bot_loop(coro: Coroutine[Any, Any, Any]):
     """Safely schedule a coroutine onto the Discord bot loop with logs."""
     try:
@@ -138,7 +141,7 @@ async def _send_dm(
 ):
     try:
         debug_print(
-            f"[DM] start -> user={getattr(user,'id','?')} has_file={bool(file_url)} msg_len={(len(message or ''))}"
+            f"[DM] start -> user={getattr(user, 'id', '?')} has_file={bool(file_url)} msg_len={(len(message or ''))}"
         )
         if file_url:
             async with httpx.AsyncClient(timeout=20) as client:
@@ -152,11 +155,11 @@ async def _send_dm(
             filename = file_url.rsplit("/", 1)[-1] or "attachment"
             await user.send(content=(message or None), file=discord.File(buf, filename))
             debug_print(
-                f"[DM] sent with file -> user={getattr(user,'id','?')} {filename}"
+                f"[DM] sent with file -> user={getattr(user, 'id', '?')} {filename}"
             )
         else:
             await user.send(content=message)
-            debug_print(f"[DM] sent text -> user={getattr(user,'id','?')}")
+            debug_print(f"[DM] sent text -> user={getattr(user, 'id', '?')}")
     except Exception as e:
         debug_print(f"[DM] failed to {getattr(user, 'id', '?')}: {e!r}")
 
@@ -201,10 +204,22 @@ async def notify_role_members(
     for m in members:
         if m.bot:
             continue
-        await _send_dm(m, message, file_url)
+        # Per-user placeholder replacement (minimal): {user}
+        try:
+            dm_text = message
+            if dm_text and "{user}" in dm_text:
+                username = (
+                    getattr(m, "display_name", None)
+                    or getattr(m, "name", None)
+                    or str(m)
+                )
+                dm_text = dm_text.replace("{user}", str(username))
+        except Exception:
+            dm_text = message
+        await _send_dm(m, dm_text, file_url)
         await asyncio.sleep(0.3)
     debug_print(
-        f"[/send_role_dm] done for role_id={role_id} guild_id={getattr(guild,'id',None)}"
+        f"[/send_role_dm] done for role_id={role_id} guild_id={getattr(guild, 'id', None)}"
     )
 
 
@@ -290,6 +305,17 @@ async def send_role_dm(
     message = str(payload.get("message") or "")
     file_url = payload.get("file_url")
     guild_id = payload.get("guild_id")
+    # Validate placeholders and reject unknown ones
+    unknown = _unknown_placeholders(message)
+    if unknown:
+        return JSONResponse(
+            {
+                "error": "unknown_placeholders",
+                "unknown": unknown,
+                "allowed": sorted(ALLOWED_PLACEHOLDERS),
+            },
+            status_code=400,
+        )
     debug_print(
         f"[/send_role_dm] payload role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} has_file={bool(file_url)}"
     )
@@ -689,21 +715,20 @@ def start_django_admin():
     Controlled via env RUN_DJANGO (truthy to enable).
     """
     try:
-        import sys, subprocess, atexit, os as _os
 
         # PROJECT_ROOT points to .../bot, repo root is parent
-        repo_root = _os.path.abspath(_os.path.join(PROJECT_ROOT, ".."))
-        manage_py = _os.path.join(repo_root, "webadmin", "manage.py")
-        if not _os.path.exists(manage_py):
+        repo_root = os.path.abspath(os.path.join(PROJECT_ROOT, ".."))
+        manage_py = os.path.join(repo_root, "webadmin", "manage.py")
+        if not os.path.exists(manage_py):
             debug_print(f"[Django] manage.py not found at {manage_py}; skip starting.")
             return
 
-        env = _os.environ.copy()
+        env = os.environ.copy()
         env.setdefault("BOT_ADMIN_API_BASE", "http://127.0.0.1:8000")
         # ADMIN_API_TOKEN は必要に応じてこのプロセスの環境から継承してください
 
         args = [sys.executable, manage_py, "runserver", "127.0.0.1:8001"]
-        proc = subprocess.Popen(args, cwd=_os.path.dirname(manage_py), env=env)
+        proc = subprocess.Popen(args, cwd=os.path.dirname(manage_py), env=env)
         debug_print("[Django] runserver started on http://127.0.0.1:8001")
 
         def _stop():
@@ -720,6 +745,26 @@ def start_django_admin():
         atexit.register(_stop)
     except Exception as e:
         debug_print(f"[Django] failed to start: {e!r}")
+
+# ---- メッセージ中のプレースホルダ検証 ----
+ALLOWED_PLACEHOLDERS = {"user"}
+PLACEHOLDER_RE = re.compile(r"(?<!\{)\{([^\{\}]+)\}(?!\})")
+
+def _unknown_placeholders(msg: str | None) -> list[str]:
+    text = msg or ""
+    unknown: list[str] = []
+    for m in PLACEHOLDER_RE.finditer(text):
+        key = (m.group(1) or "").strip().lower()
+        if key not in ALLOWED_PLACEHOLDERS:
+            unknown.append(m.group(1).strip())
+    # unique, keep readable order (by first occurrence)
+    seen = set()
+    uniq = []
+    for u in unknown:
+        if u not in seen:
+            seen.add(u)
+            uniq.append(u)
+    return uniq
 
 
 # RUN_DJANGO=1 なら Django 管理画面を並行起動（デバッグ用）

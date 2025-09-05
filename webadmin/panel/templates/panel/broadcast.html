@@ -37,6 +37,9 @@
           <div>
             <label for="id_message">メッセージ</label>
             {{ form.message }}
+            <div style="font-size: 0.9em; color: #555;">
+              ヒント: メッセージ中の {user} は各メンバーの表示名に置換されます。未対応の {…} が含まれるとエラーになります。
+            </div>
             {{ form.message.errors }}
           </div>
           <div>
