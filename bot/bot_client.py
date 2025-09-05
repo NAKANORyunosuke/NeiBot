@@ -422,14 +422,16 @@ async def twitch_callback(request: Request):
 
     # 6) Discord通知
     try:
-        schedule_in_bot_loop(
-            notify_discord_user(
-                int(state),
-                rec.get("twitch_username"),
-                rec.get("tier"),
-                rec.get("streak_months", 0),
+        # Disabled to avoid duplicate DM; handled in LinkCog
+        if False:
+            schedule_in_bot_loop(
+                notify_discord_user(
+                    int(state),
+                    rec.get("twitch_username"),
+                    rec.get("tier"),
+                    rec.get("streak_months", 0),
+                )
             )
-        )
     except Exception as e:
         debug_print("❌ failed to schedule notify:", repr(e))
 
