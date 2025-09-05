@@ -154,6 +154,47 @@ def get_broadcaster_oauth() -> Tuple[str, str]:
     return data["twitch_access_token"], str(data["twitch_id"])
 
 
+def get_eventsub_config() -> Tuple[str, str]:
+    """
+    EventSub 用の (callback_url, secret) を返す。
+    既存キーを流用:
+      - callback_url: token.json の "twitch_redirect_uri" のベースURLを使い、パスを "/twitch_eventsub" に置換
+      - secret: token.json の "twitch_secret_key" をそのまま使用
+
+    環境変数での上書きも可:
+      - TWITCH_EVENTSUB_CALLBACK, TWITCH_EVENTSUB_SECRET
+    """
+    # env override（任意）
+    env_cb = os.getenv("TWITCH_EVENTSUB_CALLBACK")
+    env_secret = os.getenv("TWITCH_EVENTSUB_SECRET")
+
+    with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # secret は client secret を流用（ユーザーの要望に従う）
+    secret = env_secret or data.get("twitch_secret_key")
+
+    # redirect_uri からホストを流用し、パスだけ /twitch_eventsub にする
+    from urllib.parse import urlparse, urlunparse
+
+    redirect_uri = data.get("twitch_redirect_uri")
+    if env_cb:
+        callback = env_cb
+    else:
+        if not redirect_uri:
+            raise RuntimeError("twitch_redirect_uri missing in token.json")
+        parsed = urlparse(redirect_uri)
+        # 絶対URLであることを期待
+        callback = urlunparse(
+            (parsed.scheme, parsed.netloc, "/twitch_eventsub", "", "", "")
+        )
+
+    if not (callback and secret):
+        raise RuntimeError("EventSub config missing: callback or secret not set")
+
+    return callback, secret
+
+
 __all__ = [
     name
     for name, obj in globals().items()

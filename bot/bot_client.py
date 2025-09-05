@@ -5,8 +5,8 @@ from typing import Coroutine, Any
 import zoneinfo
 import discord
 from discord.ext import commands
-from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, Request, Header
+from fastapi.responses import PlainTextResponse, JSONResponse
 import uvicorn
 import httpx
 import os
@@ -24,7 +24,14 @@ from bot.utils.save_and_load import (
     load_subscription_categories,
     save_subscription_categories,
 )
-from bot.utils.twitch import get_user_info_and_subscription
+from bot.utils.twitch import (
+    get_user_info_and_subscription,
+    register_eventsub_subscriptions,
+)
+from bot.utils.save_and_load import load_users, save_linked_users, get_eventsub_config
+import hmac
+import hashlib
+import datetime as dt
 
 # ==================== パス設定（絶対パス） ====================
 
@@ -198,6 +205,128 @@ async def twitch_callback(request: Request):
     return PlainTextResponse("連携完了", status_code=200)
 
 
+# ---- EventSub Webhook ----
+def _hmac_sha256(secret: str, message: bytes) -> str:
+    mac = hmac.new(secret.encode("utf-8"), message, hashlib.sha256)
+    return "sha256=" + mac.hexdigest()
+
+
+def _verify_signature(
+    secret: str, msg_id: str, msg_ts: str, body: bytes, signature: str
+) -> bool:
+    message = (msg_id + msg_ts).encode("utf-8") + body
+    expected = _hmac_sha256(secret, message)
+    return hmac.compare_digest(expected, signature)
+
+
+def _find_discord_ids_by_twitch_id(twitch_user_id: str) -> list[str]:
+    users = load_users()
+    res = []
+    for did, info in users.items():
+        if isinstance(info, dict) and str(info.get("twitch_user_id")) == str(
+            twitch_user_id
+        ):
+            res.append(str(did))
+    return res
+
+
+@app.post("/twitch_eventsub")
+async def twitch_eventsub(
+    request: Request,
+    twitch_msg_id: str = Header(None, alias="Twitch-Eventsub-Message-Id"),
+    twitch_msg_type: str = Header(None, alias="Twitch-Eventsub-Message-Type"),
+    twitch_msg_ts: str = Header(None, alias="Twitch-Eventsub-Message-Timestamp"),
+    twitch_signature: str = Header(None, alias="Twitch-Eventsub-Message-Signature"),
+):
+    body = await request.body()
+    try:
+        data = await request.json()
+    except Exception:
+        return PlainTextResponse("invalid json", status_code=400)
+
+    # webhook verification
+    if twitch_msg_type == "webhook_callback_verification":
+        challenge = data.get("challenge")
+        debug_print("[EventSub] verification")
+        return PlainTextResponse(challenge or "", status_code=200)
+
+    # notification / revocation must verify signature
+    try:
+        _, secret = get_eventsub_config()
+    except Exception as e:
+        return PlainTextResponse(f"EventSub secret missing: {e}", status_code=500)
+
+    if not (twitch_msg_id and twitch_msg_ts and twitch_signature):
+        return PlainTextResponse("missing headers", status_code=400)
+
+    if not _verify_signature(
+        secret, twitch_msg_id, twitch_msg_ts, body, twitch_signature
+    ):
+        return PlainTextResponse("invalid signature", status_code=403)
+
+    if twitch_msg_type == "notification":
+        sub_type = (data.get("subscription") or {}).get("type")
+        event = data.get("event") or {}
+        debug_print(f"[EventSub] notify: {sub_type}")
+        users = load_users()
+
+        # Map twitch user -> discord ids
+        t_user_id = event.get("user_id") or event.get("user") or event.get("user_login")
+        dids = _find_discord_ids_by_twitch_id(str(t_user_id)) if t_user_id else []
+        if not dids:
+            # 未リンク（Discord不明）はスキップ
+            return JSONResponse({"status": "ok", "matched": 0})
+
+        now = dt.datetime.now(JST).date()
+
+        for did in dids:
+            info = users.get(did, {}) if isinstance(users.get(did, {}), dict) else {}
+
+            if sub_type == "channel.subscribe":
+                info["is_subscriber"] = True
+                if event.get("tier"):
+                    info["tier"] = event.get("tier")
+                # 初回開始日の候補（ヘッダのタイムスタンプの日付）
+                if not info.get("subscribed_since"):
+                    ts = twitch_msg_ts[:10] if twitch_msg_ts else now.isoformat()
+                    info["subscribed_since"] = ts
+                info["last_verified_at"] = now
+
+            elif sub_type == "channel.subscription.message":
+                # 再サブメッセージに cumulative/streak が含まれる
+                cum = event.get("cumulative_months")
+                if isinstance(cum, int) and cum >= 0:
+                    info["cumulative_months"] = cum
+                # streak_months は int または {"months": int} の場合がある
+                streak_val = event.get("streak_months")
+                if isinstance(streak_val, dict):
+                    sm = streak_val.get("months")
+                    if isinstance(sm, int) and sm >= 0:
+                        info["streak_months"] = sm
+                elif isinstance(streak_val, int) and streak_val >= 0:
+                    info["streak_months"] = streak_val
+
+                if event.get("tier"):
+                    info["tier"] = event.get("tier")
+                info["is_subscriber"] = True
+                info["last_verified_at"] = now
+
+            elif sub_type == "channel.subscription.end":
+                info["is_subscriber"] = False
+                info["last_verified_at"] = now
+
+            users[str(did)] = info
+
+        save_linked_users(users)
+        return JSONResponse({"status": "ok", "matched": len(dids)})
+
+    if twitch_msg_type == "revocation":
+        debug_print("[EventSub] revoked:", data)
+        return JSONResponse({"status": "revoked"})
+
+    return PlainTextResponse("ignored", status_code=200)
+
+
 # ===== FastAPI を別スレッドで起動 =====
 def start_api():
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
@@ -222,6 +351,11 @@ async def on_ready():
     save_all_guild_members(bot)
     await make_subrole(bot)
     await make_category_and_channel(bot)
+    # EventSub購読を（可能なら）登録
+    try:
+        await register_eventsub_subscriptions()
+    except Exception as e:
+        debug_print(f"[EventSub] registration skipped or failed: {e!r}")
 
 
 async def ensure_role_exists(

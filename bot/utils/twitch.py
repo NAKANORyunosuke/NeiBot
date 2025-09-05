@@ -4,8 +4,13 @@ import urllib.parse
 import httpx
 from typing import Any, Dict, Optional, Tuple
 import asyncio
-from bot.utils.save_and_load import *
+from bot.utils.save_and_load import (
+    get_twitch_keys,
+    get_broadcaster_oauth,
+    get_eventsub_config,
+)
 from bot.common import debug_print
+
 # ==================== パス設定（絶対パス） ====================
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
@@ -14,10 +19,13 @@ USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "all_users.json")
 
 API_BASE = "https://api.twitch.tv/helix"
 
+# Bits取得の一時無効化フラグ（401/403検出後は以後スキップ）
+_BITS_DISABLED = False
+
 # リトライ設定
-HTTP_TIMEOUT = 10.0            # 秒
+HTTP_TIMEOUT = 10.0  # 秒
 MAX_RETRIES = 3
-BACKOFF_BASE = 0.5             # 秒（指数バックオフの初期値）
+BACKOFF_BASE = 0.5  # 秒（指数バックオフの初期値）
 
 
 async def _print_json_response(resp: httpx.Response, label: str = ""):
@@ -85,7 +93,9 @@ async def _request_json(
     backoff = BACKOFF_BASE
     while True:
         try:
-            r = await client.request(method, url, headers=headers, params=params, data=data)
+            r = await client.request(
+                method, url, headers=headers, params=params, data=data
+            )
             # 429 or 5xx のときだけリトライ（それ以外は返す）
             if r.status_code in (429,) or 500 <= r.status_code < 600:
                 attempt += 1
@@ -97,7 +107,7 @@ async def _request_json(
                 backoff *= 2
                 continue
             return r
-        except httpx.HTTPError as e:
+        except httpx.HTTPError:
             attempt += 1
             if attempt >= MAX_RETRIES:
                 raise
@@ -107,8 +117,11 @@ async def _request_json(
 
 # ==================== API呼び出し ====================
 
-async def _get_me_and_login(client: httpx.AsyncClient, headers: Dict[str, str]) -> Tuple[str, str]:
-    """ /users で自分の id と login を取得 """
+
+async def _get_me_and_login(
+    client: httpx.AsyncClient, headers: Dict[str, str]
+) -> Tuple[str, str]:
+    """/users で自分の id と login を取得"""
     r = await _request_json(client, "GET", f"{API_BASE}/users", headers=headers)
     debug_print("[DEBUG] /users status:", r.status_code)
     try:
@@ -134,7 +147,9 @@ async def _get_user_subscription_to_broadcaster(
     必要スコープ: user:read:subscriptions（viewer token）
     """
     params = {"broadcaster_id": broadcaster_id, "user_id": user_id}
-    r = await _request_json(client, "GET", f"{API_BASE}/subscriptions/user", headers=headers, params=params)
+    r = await _request_json(
+        client, "GET", f"{API_BASE}/subscriptions/user", headers=headers, params=params
+    )
     debug_print("[DEBUG] /subscriptions/user status:", r.status_code)
     debug_print("[DEBUG] /subscriptions/user body:", r.text)
     await _print_json_response(r, "/users")
@@ -147,6 +162,131 @@ async def _get_user_subscription_to_broadcaster(
     return data[0] if data else None
 
 
+async def _get_broadcaster_subscription_by_user(
+    client: httpx.AsyncClient,
+    broadcaster_id: str,
+    user_id: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    配信者トークンで /subscriptions を参照し、特定ユーザーの streak/cumulative/開始日を取得
+    必要スコープ: channel:read:subscriptions（broadcaster token）
+    """
+    headers = _broadcaster_headers()
+    params = {"broadcaster_id": broadcaster_id, "user_id": user_id}
+    r = await _request_json(
+        client, "GET", f"{API_BASE}/subscriptions", headers=headers, params=params
+    )
+    debug_print("[DEBUG] /subscriptions (broadcaster) status:", r.status_code)
+    debug_print("[DEBUG] /subscriptions (broadcaster) body:", r.text)
+    if r.status_code == 404:
+        return None
+    # 401/403 はスコープ不足や無効トークンの可能性 → 呼び出し元で握りつぶす
+    r.raise_for_status()
+    data = r.json().get("data", [])
+    if not data:
+        return None
+    sub = data[0]
+    # フィールド名の揺れに耐性
+    started_at = (
+        sub.get("started_at") or sub.get("start_date") or sub.get("created_at") or None
+    )
+    return {
+        "tier": sub.get("tier"),
+        "cumulative_months": sub.get("cumulative_months"),
+        "streak_months": sub.get("streak_months") or sub.get("streak"),
+        "sub_started_at": started_at,
+        "is_gift": sub.get("is_gift"),
+    }
+
+
+async def register_eventsub_subscriptions(
+    callback_url: str | None = None, *, client: httpx.AsyncClient | None = None
+) -> None:
+    """EventSubの購読を作成（subscribe/resub/end）。すでに存在する場合はAPI側で重複を許容。"""
+    if callback_url is None:
+        cb, _ = get_eventsub_config()
+        callback_url = cb
+
+    _, broadcaster_id = get_broadcaster_oauth()
+    _, secret = get_eventsub_config()
+
+    payloads = [
+        {
+            "type": "channel.subscribe",
+            "version": "1",
+            "condition": {"broadcaster_user_id": broadcaster_id},
+            "transport": {
+                "method": "webhook",
+                "callback": callback_url,
+                "secret": secret,
+            },
+        },
+        {
+            "type": "channel.subscription.message",
+            "version": "1",
+            "condition": {"broadcaster_user_id": broadcaster_id},
+            "transport": {
+                "method": "webhook",
+                "callback": callback_url,
+                "secret": secret,
+            },
+        },
+        {
+            "type": "channel.subscription.end",
+            "version": "1",
+            "condition": {"broadcaster_user_id": broadcaster_id},
+            "transport": {
+                "method": "webhook",
+                "callback": callback_url,
+                "secret": secret,
+            },
+        },
+    ]
+
+    close_client = False
+    if client is None:
+        client = _new_client()
+        close_client = True
+    try:
+        async with client:
+            # App Access Token を取得
+            client_id, client_secret, _ = get_twitch_keys()
+            token_url = "https://id.twitch.tv/oauth2/token"
+            payload = {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "grant_type": "client_credentials",
+            }
+            tr = await client.post(
+                token_url,
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            tr.raise_for_status()
+            app_token = tr.json().get("access_token")
+
+            headers = {
+                "Authorization": f"Bearer {app_token}",
+                "Client-Id": client_id,
+                "Content-Type": "application/json",
+            }
+
+            for body in payloads:
+                r = await client.post(
+                    f"{API_BASE}/eventsub/subscriptions",
+                    headers=headers,
+                    content=json.dumps(body),
+                )
+                # 409/400 は既存や権限不足の場合があるが、ログを出して継続
+                debug_print("[EventSub] create", body["type"], "status:", r.status_code)
+                try:
+                    debug_print("[EventSub] body:", r.text)
+                except Exception:
+                    pass
+    finally:
+        pass
+
+
 async def _get_bits_leaderboard_for_user(
     client: httpx.AsyncClient,
     user_id: str,
@@ -156,17 +296,27 @@ async def _get_bits_leaderboard_for_user(
     必要スコープ: bits:read（broadcaster token）
     備考: user_id を指定すればトップ外でも対象ユーザーの行が返る。
     """
+    global _BITS_DISABLED
+    if _BITS_DISABLED:
+        return None, 0
+
     headers = _broadcaster_headers()
     params = {
         "count": 100,
         "period": "all",
         "user_id": user_id,
     }
-    r = await _request_json(client, "GET", f"{API_BASE}/bits/leaderboard", headers=headers, params=params)
+    r = await _request_json(
+        client, "GET", f"{API_BASE}/bits/leaderboard", headers=headers, params=params
+    )
     debug_print("[DEBUG] /bits/leaderboard status:", r.status_code)
     debug_print("[DEBUG] /bits/leaderboard body:", r.text)
 
-    # 401（トークン失効/スコープ不足）などは呼び出し元で raise したいのでここで raise_for_status する
+    # 401/403 はトークン失効やスコープ不足の可能性が高い → 以後スキップ
+    if r.status_code in (401, 403):
+        _BITS_DISABLED = True
+        debug_print("[INFO] bits leaderboard disabled due to auth error (401/403).")
+        return None, 0
     if r.status_code == 404:
         return None, 0
 
@@ -180,6 +330,7 @@ async def _get_bits_leaderboard_for_user(
 
 
 # ==================== 公開関数：ユーザー情報 + サブ情報 + Bits ====================
+
 
 async def get_user_info_and_subscription(
     viewer_access_token: str,
@@ -225,18 +376,45 @@ async def get_user_info_and_subscription(
         if sub:
             # Helix の揺れに耐える
             result["tier"] = sub.get("tier")
-            result["streak_months"] = int(sub.get("streak_months") or sub.get("streak") or 0)
+            result["streak_months"] = int(
+                sub.get("streak_months") or sub.get("streak") or 0
+            )
             result["cumulative_months"] = int(sub.get("cumulative_months") or 0)
             result["is_subscriber"] = True
 
+        # 2.5) 配信者視点のサブ情報（streak/cumulative/開始日）で上書き強化
+        if result["is_subscriber"]:
+            try:
+                bsub = await _get_broadcaster_subscription_by_user(
+                    client, broadcaster_id, user_id
+                )
+                if bsub:
+                    if bsub.get("tier") is not None:
+                        result["tier"] = bsub.get("tier")
+                    if bsub.get("cumulative_months") is not None:
+                        result["cumulative_months"] = int(
+                            bsub.get("cumulative_months") or 0
+                        )
+                    if bsub.get("streak_months") is not None:
+                        result["streak_months"] = int(bsub.get("streak_months") or 0)
+                    if bsub.get("sub_started_at"):
+                        result["sub_started_at"] = bsub.get("sub_started_at")
+            except httpx.HTTPStatusError:
+                # スコープ不足などは無視して続行
+                pass
+
         # 3) Bits情報（broadcaster token）
         try:
-            bits_rank, bits_score = await _get_bits_leaderboard_for_user(client, user_id)
+            bits_rank, bits_score = await _get_bits_leaderboard_for_user(
+                client, user_id
+            )
             result["bits_rank"] = bits_rank
             result["bits_score"] = int(bits_score or 0)
         except httpx.HTTPStatusError as e:
             # スコープ不足やトークン失効などの場合はログだけ出して0扱いに
-            debug_print(f"[WARN] bits leaderboard fetch failed: {e.response.status_code} {e.response.text}")
+            debug_print(
+                f"[WARN] bits leaderboard fetch failed: {e.response.status_code} {e.response.text}"
+            )
         except httpx.HTTPError as e:
             debug_print(f"[WARN] bits leaderboard fetch http error: {e!r}")
 

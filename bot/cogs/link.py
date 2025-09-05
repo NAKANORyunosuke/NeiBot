@@ -103,6 +103,9 @@ class LinkCog(commands.Cog):
             twitch_name = info.get("twitch_username")
             is_sub = info.get("is_subscriber", False)
             tier = info.get("tier")  # "1000"/"2000"/"3000" or None
+            streak = int(info.get("streak_months", 0) or 0)
+            cumulative = int(info.get("cumulative_months", 0) or 0)
+            since = info.get("subscribed_since")  # ISO文字列 or None
 
             try:
                 member = ctx.guild.get_member(
@@ -125,12 +128,26 @@ class LinkCog(commands.Cog):
 
             mark_resolved(discord_id)
 
+            # 念のため、直近で保存された値を再読込（初回リンク直後のズレ対策）
+            users = load_users()
+            info = users.get(discord_id, info)
+            streak = int(info.get("streak_months", streak) or streak)
+            cumulative = int(info.get("cumulative_months", cumulative) or cumulative)
+            since = info.get("subscribed_since", since)
+
+            # フォールバック: サブであれば累計は最低1
+            if is_sub and cumulative <= 0:
+                cumulative = 1
+
             tier_msg = {"1000": "1", "2000": "2", "3000": "3"}.get(tier, "0")
             msg = (
                 "✅ Twitch連携が完了しました！\n"
                 f"・Twitch名: **{twitch_name}**\n"
                 f"・サブスク状態: {'✅ 登録中' if is_sub else '❌ 未登録'}\n"
                 f"・Tier: {tier_msg}\n"
+                # f"・連続月数(streak): {streak}ヶ月\n"
+                # f"・累計月数(cumulative): {cumulative}ヶ月\n"
+                # f"・サブスク開始日: {since if since else '不明'}\n"
                 "※ ロールが反映されていない場合は、数秒待ってから再度ご確認ください。"
             )
 
