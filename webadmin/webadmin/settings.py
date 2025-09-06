@@ -4,8 +4,30 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure-key")
-DEBUG = True
-ALLOWED_HOSTS = ["*"]
+# Toggle DEBUG via env (default: True for local dev)
+DEBUG = (os.environ.get("DJANGO_DEBUG") or "true").lower() in ("1", "true", "yes", "on")
+
+# Align with nginx.conf (neige-subscription.com) in production
+if DEBUG:
+    ALLOWED_HOSTS = ["*"]
+else:
+    ALLOWED_HOSTS = [
+        "neige-subscription.com",
+        "www.neige-subscription.com",
+    ]
+    # Trust HTTPS proxy headers from Nginx and set CSRF trusted origins
+    CSRF_TRUSTED_ORIGINS = [
+        "https://neige-subscription.com",
+        "https://www.neige-subscription.com",
+    ]
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    USE_X_FORWARDED_HOST = True
+    # Secure cookies for HTTPS and predictable samesite behavior
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    CSRF_COOKIE_SAMESITE = "Lax"
+    # Build absolute URLs as https in contexts where scheme is not inferred
+    ACCOUNT_DEFAULT_HTTP_PROTOCOL = "https"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -84,8 +106,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # allauth
 SITE_ID = 1
 LOGIN_URL = "/accounts/login/"
-LOGIN_REDIRECT_URL = "/"
-LOGOUT_REDIRECT_URL = "/"
+LOGIN_REDIRECT_URL = "/broadcast/"
+# Ensure allauth also uses the same redirect
+ACCOUNT_LOGIN_REDIRECT_URL = LOGIN_REDIRECT_URL
+LOGOUT_REDIRECT_URL = "/broadcast/"
+ACCOUNT_LOGOUT_REDIRECT_URL = LOGOUT_REDIRECT_URL
 
 AUTHENTICATION_BACKENDS = (
     "django.contrib.auth.backends.ModelBackend",
@@ -105,6 +130,9 @@ SOCIALACCOUNT_PROVIDERS = {
         "SCOPE": ["user:read:email"],
     }
 }
+
+# Use GET to initiate social login to avoid CSRF POST on provider start
+SOCIALACCOUNT_LOGIN_ON_GET = True
 
 # Admin API endpoint for the bot (FastAPI) and token for auth
 # token.json を単一のソースとして使用する（環境変数は無視）
