@@ -6,6 +6,7 @@ from django.shortcuts import redirect, render
 from allauth.socialaccount.models import SocialAccount
 from .forms import RoleBroadcastForm
 import requests
+from pathlib import Path
 
 
 def index(request: HttpRequest) -> HttpResponse:
@@ -28,14 +29,21 @@ def broadcast(request: HttpRequest) -> HttpResponse:
             guild_id = int(form.cleaned_data["guild_id"]) if form.cleaned_data.get("guild_id") else None
             message = form.cleaned_data["message"] or ""
             file_url = None
+            file_path = None
 
             # Save attachment (if any) and build absolute URL
             f = form.cleaned_data.get("attachment")
             if f:
                 from django.core.files.storage import default_storage
                 from django.core.files.base import ContentFile
-                path = default_storage.save(f"uploads/{f.name}", ContentFile(f.read()))
-                file_url = request.build_absolute_uri(settings.MEDIA_URL + path.split("/media/")[-1])
+
+                # Save into MEDIA_ROOT/uploads and build both absolute URL and local path
+                rel_path = default_storage.save(f"uploads/{f.name}", ContentFile(f.read()))
+                # Normalize URL path
+                url_path = (str(rel_path).replace("\\", "/").lstrip("/"))
+                file_url = request.build_absolute_uri(settings.MEDIA_URL + url_path)
+                # Absolute filesystem path for the bot (runs on same host)
+                file_path = str((Path(settings.MEDIA_ROOT) / rel_path).resolve())
 
             # Call bot admin API
             headers = {"Authorization": f"Bearer {settings.ADMIN_API_TOKEN}"} if settings.ADMIN_API_TOKEN else {}
@@ -44,6 +52,8 @@ def broadcast(request: HttpRequest) -> HttpResponse:
                 payload["guild_id"] = guild_id
             if file_url:
                 payload["file_url"] = file_url
+            if file_path:
+                payload["file_path"] = file_path
             try:
                 r = requests.post(f"{settings.BOT_ADMIN_API_BASE}/send_role_dm", json=payload, headers=headers, timeout=10)
                 if r.status_code == 200:

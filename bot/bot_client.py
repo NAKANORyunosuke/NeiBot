@@ -44,6 +44,7 @@ import hmac
 import hashlib
 import datetime as dt
 import io
+import os
 
 # ==================== パス設定（絶対パス） ====================
 
@@ -151,13 +152,32 @@ async def notify_discord_user(
 
 
 async def _send_dm(
-    user: discord.User | discord.Member, message: str, file_url: str | None = None
+    user: discord.User | discord.Member,
+    message: str,
+    file_url: str | None = None,
+    file_path: str | None = None,
 ):
     try:
         debug_print(
-            f"[DM] start -> user={getattr(user, 'id', '?')} has_file={bool(file_url)} msg_len={(len(message or ''))}"
+            f"[DM] start -> user={getattr(user, 'id', '?')} has_url={bool(file_url)} has_path={bool(file_path)} msg_len={(len(message or ''))}"
         )
-        if file_url:
+        buf = None
+        filename = None
+        # Prefer local filesystem if provided (same host)
+        if file_path:
+            try:
+                if os.path.isfile(file_path):
+                    debug_print(f"[DM] reading local attachment: {file_path}")
+                    with open(file_path, "rb") as fp:
+                        data = fp.read()
+                    buf = io.BytesIO(data)
+                    filename = os.path.basename(file_path) or "attachment"
+                else:
+                    debug_print(f"[DM] local attachment not found: {file_path}")
+            except Exception as e:
+                debug_print(f"[DM] failed reading local file: {e!r}")
+        # Fallback to HTTP(S) download
+        if buf is None and file_url:
             async with httpx.AsyncClient(timeout=20) as client:
                 debug_print(f"[DM] downloading attachment: {file_url}")
                 r = await client.get(file_url)
@@ -166,7 +186,9 @@ async def _send_dm(
                 debug_print(
                     f"[DM] downloaded: status={r.status_code} bytes={len(r.content)}"
                 )
-            filename = file_url.rsplit("/", 1)[-1] or "attachment"
+            filename = filename or file_url.rsplit("/", 1)[-1] or "attachment"
+
+        if buf is not None:
             await user.send(content=(message or None), file=discord.File(buf, filename))
             debug_print(
                 f"[DM] sent with file -> user={getattr(user, 'id', '?')} {filename}"
@@ -182,6 +204,7 @@ async def notify_role_members(
     role_id: int,
     message: str,
     file_url: str | None = None,
+    file_path: str | None = None,
     guild_id: int | None = None,
 ):
     await bot.wait_until_ready()
@@ -230,7 +253,7 @@ async def notify_role_members(
                 dm_text = dm_text.replace("{user}", str(username))
         except Exception:
             dm_text = message
-        await _send_dm(m, dm_text, file_url)
+        await _send_dm(m, dm_text, file_url, file_path)
         await asyncio.sleep(0.3)
     debug_print(
         f"[/send_role_dm] done for role_id={role_id} guild_id={getattr(guild, 'id', None)}"
@@ -325,6 +348,7 @@ async def send_role_dm(
     role_id = int(payload.get("role_id"))
     message = str(payload.get("message") or "")
     file_url = payload.get("file_url")
+    file_path = payload.get("file_path")
     guild_id = payload.get("guild_id")
     # Validate placeholders and reject unknown ones
     unknown = _unknown_placeholders(message)
@@ -342,7 +366,11 @@ async def send_role_dm(
     )
     schedule_in_bot_loop(
         notify_role_members(
-            role_id, message, file_url, int(guild_id) if guild_id else None
+            role_id,
+            message,
+            file_url,
+            file_path,
+            int(guild_id) if guild_id else None,
         )
     )
     debug_print("[/send_role_dm] queued notify task")
