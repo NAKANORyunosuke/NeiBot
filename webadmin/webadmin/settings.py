@@ -89,6 +89,8 @@ DATABASES = {
         "ENGINE": "django.db.backends.sqlite3",
         # Use the same DB file as the bot (repo root)
         "NAME": (BASE_DIR.parent / "db.sqlite3"),
+        # Increase SQLite lock wait to coexist with the bot (WAL)
+        "OPTIONS": {"timeout": 30},
     }
 }
 
