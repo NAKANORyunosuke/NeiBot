@@ -14,6 +14,13 @@ def _ensure_twitch_socialapp():
         return
     try:
         import json, os
+        # If credentials are provided in settings (SOCIALACCOUNT_PROVIDERS['twitch']['APP']),
+        # let allauth use those and skip DB SocialApp altogether to avoid duplicates.
+        twitch_provider_cfg = getattr(settings, "SOCIALACCOUNT_PROVIDERS", {}).get("twitch", {})
+        app_cfg = twitch_provider_cfg.get("APP") or {}
+        if app_cfg.get("client_id") and app_cfg.get("secret"):
+            return
+
         token_path = os.path.join(dj_settings.BASE_DIR.parent, "venv", "token.json")
         client_id = None
         secret = None
@@ -26,13 +33,20 @@ def _ensure_twitch_socialapp():
         secret = os.environ.get("TWITCH_CLIENT_SECRET") or secret
         if not (client_id and secret):
             return
-        app, _ = SocialApp.objects.get_or_create(provider="twitch", name="Twitch")
+
+        # Create or update a single SocialApp for Twitch and ensure only one exists per site
+        app, _ = SocialApp.objects.get_or_create(provider="twitch", defaults={"name": "Twitch"})
+        app.name = app.name or "Twitch"
         app.client_id = client_id
         app.secret = secret
         app.save()
-        # Ensure site mapping
+
+        # Ensure site mapping is unique (set instead of add)
         site = Site.objects.get_or_create(id=1, defaults={"domain": "localhost:8001", "name": "Local"})[0]
-        app.sites.add(site)
+        app.sites.set([site])
+
+        # Remove any duplicate Twitch apps to prevent MultipleObjectsReturned
+        SocialApp.objects.filter(provider="twitch").exclude(id=app.id).delete()
     except Exception:
         pass
 
