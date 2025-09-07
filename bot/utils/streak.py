@@ -1,6 +1,6 @@
 import datetime
 from typing import Dict, Any, Optional
-from bot.utils.save_and_load import load_users, save_linked_users
+from bot.utils.save_and_load import get_linked_user, patch_linked_user
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
@@ -61,9 +61,8 @@ def reconcile_and_save_link(
     if today is None:
         today = datetime.datetime.now(JST).date()
 
-    linked = load_users()
     did = str(discord_id)
-    prev = linked.get(did, {}) if isinstance(linked.get(did, {}), dict) else {}
+    prev = get_linked_user(did) or {}
 
     # 直近の検証日を使用（過去実装の linked_date ではなく last_verified_at を基準に）
     prev_linked_iso = prev.get("last_verified_at")  # "YYYY-MM-DD" or date
@@ -118,16 +117,13 @@ def reconcile_and_save_link(
     else:
         # 非サブならリセット
         new_streak = 0
-    # 保存用にエントリを用意
-    if did not in linked or not isinstance(linked.get(did), dict):
-        linked[did] = {}
-
     # APIの最新値をコピー
+    updated: Dict[str, Any] = dict(prev)
     for key in list(info.keys()):
-        linked[did][key] = info[key]
+        updated[key] = info[key]
 
     # 計算済み streak を反映
-    linked[did]["streak_months"] = int(new_streak)
+    updated["streak_months"] = int(new_streak)
 
     # 累計月数は“当月サブ確認が取れた回数”として自前更新
     new_cum = prev_cum
@@ -138,13 +134,13 @@ def reconcile_and_save_link(
             mdiff = _month_diff(prev_date, today)
             if mdiff > 0:
                 new_cum = prev_cum + 1
-    linked[did]["cumulative_months"] = int(new_cum)
+    updated["cumulative_months"] = int(new_cum)
 
     # サブスク登録日（できる限り確実に）：
     # 1) APIの sub_started_at があればそれを採用
     # 2) なければ cumulative_months から推定（今月の1日から cum-1 ヶ月引く）
     # 3) 既存の subscribed_since があれば最小（日付が古い方）を維持
-    prev_since_iso = linked[did].get("subscribed_since") or prev.get("subscribed_since")
+    prev_since_iso = updated.get("subscribed_since") or prev.get("subscribed_since")
     prev_since: Optional[datetime.date] = None
     if prev_since_iso:
         try:
@@ -183,16 +179,17 @@ def reconcile_and_save_link(
         chosen_since = today or datetime.datetime.now(JST).date()
 
     if chosen_since is not None:
-        linked[did]["subscribed_since"] = chosen_since.isoformat()
+        updated["subscribed_since"] = chosen_since.isoformat()
 
     # 付帯メタ情報
-    linked[did]["resolved"] = True
-    linked[did]["first_notice_at"] = None
-    linked[did]["last_verified_at"] = today or datetime.datetime.now(JST).date()
+    updated["resolved"] = True
+    updated["first_notice_at"] = None
+    updated["last_verified_at"] = today or datetime.datetime.now(JST).date()
     # 直近のリンク完了日（OAuth完了のタイミング）として更新
     # 既存運用では linked_date を参照しているケースがあるため、毎回上書きする
     t = today or datetime.datetime.now(JST).date()
-    linked[did]["linked_date"] = t.isoformat()
+    updated["linked_date"] = t.isoformat()
 
-    save_linked_users(linked)
-    return linked[did]
+    # 保存
+    res = patch_linked_user(did, updated, include_none=True)
+    return res

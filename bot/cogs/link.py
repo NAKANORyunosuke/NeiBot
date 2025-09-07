@@ -12,7 +12,7 @@ from bot.monthly_relink_bot import mark_resolved
 from bot.utils.save_and_load import (
     load_role_ids,
     load_users,
-    save_linked_users,
+    patch_linked_user,
 )
 
 
@@ -152,16 +152,13 @@ class LinkCog(commands.Cog):
             )
 
             try:
-                users[discord_id]["dm_failed"] = False
                 await ctx.author.send(msg)
+                patch_linked_user(discord_id, {"dm_failed": False, "dm_failed_reason": None}, include_none=True)
             except discord.Forbidden:
-                users[discord_id]["dm_failed"] = True
-                users[discord_id]["dm_failed_reason"] = "DM拒否 (Forbidden)"
+                patch_linked_user(discord_id, {"dm_failed": True, "dm_failed_reason": "DM拒否 (Forbidden)"})
             except discord.HTTPException as e:
-                users[discord_id]["dm_failed"] = True
-                users[discord_id]["dm_failed_reason"] = f"HTTPエラー: {e}"
+                patch_linked_user(discord_id, {"dm_failed": True, "dm_failed_reason": f"HTTPエラー: {e}"})
             finally:
-                save_linked_users(users)
                 return
 
         try:

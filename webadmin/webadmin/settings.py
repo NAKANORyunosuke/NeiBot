@@ -1,7 +1,11 @@
 import os
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Ensure repo root is importable (to import `bot.*` helpers from admin actions)
+if str(BASE_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR.parent))
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure-key")
 # Toggle DEBUG via env (default: True for local dev)
@@ -83,7 +87,8 @@ WSGI_APPLICATION = "webadmin.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        # Use the same DB file as the bot (repo root)
+        "NAME": (BASE_DIR.parent / "db.sqlite3"),
     }
 }
 

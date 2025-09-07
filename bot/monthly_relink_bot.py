@@ -23,7 +23,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from bot.utils.save_and_load import (
     load_users,
-    save_linked_users,
+    patch_linked_user,
 )
 from bot.common import debug_print
 
@@ -68,13 +68,8 @@ def mark_resolved(discord_id: str) -> None:
     OAuth完了や当月の購読確認がとれたタイミングで呼ぶと、再送対象から外れる。
     既存のOAuthコールバックや検証処理から利用してください。
     """
-    state = load_users()
-    # ユーザーエントリが存在しない場合にも安全に更新
     did = str(discord_id)
-    if did not in state or not isinstance(state.get(did), dict):
-        state[did] = {}
-    state[did]["resolved"] = True
-    save_linked_users(state)
+    patch_linked_user(did, {"resolved": True})
 
 
 # ========= Cog 実装 =========
@@ -93,9 +88,8 @@ class ReLinkCog(commands.Cog):
             debug_print("[monthly] 月初めではないためスキップ")
             return
 
-        state = load_users()
-
         sent = 0
+        state = load_users()
         # 値が辞書でない（誤って混入した）トップレベルキーを無視
         for discord_id, user in list(state.items()):
             if not isinstance(user, dict):
@@ -105,12 +99,15 @@ class ReLinkCog(commands.Cog):
             )
             if ok:
                 sent += 1
-                state[str(discord_id)]["first_notice_at"] = now.isoformat()
-                state[str(discord_id)]["last_notice_at"] = now.isoformat()
-                state[str(discord_id)]["resolved"] = False
+                patch_linked_user(
+                    str(discord_id),
+                    {
+                        "first_notice_at": now.isoformat(),
+                        "last_notice_at": now.isoformat(),
+                        "resolved": False,
+                    },
+                )
             await asyncio.sleep(1)  # レート制御（必要に応じて調整）
-
-        save_linked_users(state)
         print(f"[monthly] 送信完了: {sent}件")
 
     async def resend_after_7days_if_unlinked(self) -> None:
@@ -158,13 +155,13 @@ class ReLinkCog(commands.Cog):
                 self.bot, int(discord_id), build_relink_message(discord_id)
             )
             if ok:
-                lu["last_notice_at"] = now.isoformat()
                 resend_cnt += 1
-            users[str(discord_id)] = lu
+                patch_linked_user(
+                    str(discord_id),
+                    {"last_notice_at": now.isoformat(), "resolved": False},
+                )
 
             await asyncio.sleep(0.5)
-
-        save_linked_users(users)
         print(f"[resend] 再送完了: {resend_cnt}件")
 
     # ===== イベントでスケジューラ起動 =====

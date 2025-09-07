@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from bot.utils.save_and_load import *
+from bot.utils.save_and_load import load_users, delete_linked_user
 
 
 class Unlink(commands.Cog):
@@ -16,8 +16,7 @@ class Unlink(commands.Cog):
         linked_users = load_users()
 
         if discord_id in linked_users:
-            del linked_users[get_guild_id()]
-            save_linked_users(linked_users)
+            delete_linked_user(discord_id)
             await ctx.respond("Twitchアカウントとのリンクを解除しました ✅", ephemeral=True)
         else:
             await ctx.respond("あなたのアカウントはTwitchとリンクされていません。", ephemeral=True)

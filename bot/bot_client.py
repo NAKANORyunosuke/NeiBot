@@ -33,7 +33,13 @@ from bot.utils.twitch import (
     get_user_info_and_subscription,
     register_eventsub_subscriptions,
 )
-from bot.utils.save_and_load import load_users, save_linked_users, get_eventsub_config
+from bot.utils.save_and_load import (
+    load_users,
+    get_eventsub_config,
+    inbox_enqueue_event,
+    inbox_mark_processed,
+)
+from bot.utils.eventsub_apply import apply_event_to_linked_users
 import hmac
 import hashlib
 import datetime as dt
@@ -501,57 +507,36 @@ async def twitch_eventsub(
         sub_type = (data.get("subscription") or {}).get("type")
         event = data.get("event") or {}
         debug_print(f"[EventSub] notify: {sub_type}")
-        users = load_users()
 
-        # Map twitch user -> discord ids
-        t_user_id = event.get("user_id") or event.get("user") or event.get("user_login")
-        dids = _find_discord_ids_by_twitch_id(str(t_user_id)) if t_user_id else []
-        if not dids:
-            # 未リンク（Discord不明）はスキップ
+        # Persist to inbox (best-effort)
+        try:
+            inbox_enqueue_event(
+                source="twitch",
+                delivery_id=str(twitch_msg_id),
+                event_type=str(sub_type or ""),
+                twitch_user_id=str(
+                    event.get("user_id") or event.get("user") or event.get("user_login") or ""
+                ) or None,
+                payload=data,
+                headers={
+                    "Twitch-Eventsub-Message-Id": twitch_msg_id,
+                    "Twitch-Eventsub-Message-Type": twitch_msg_type,
+                    "Twitch-Eventsub-Message-Timestamp": twitch_msg_ts,
+                },
+                status="pending",
+            )
+        except Exception as e:
+            debug_print(f"[EventSub][inbox] enqueue failed: {e!r}")
+
+        # Apply immediately
+        try:
+            matched = apply_event_to_linked_users(sub_type, event, twitch_msg_ts)
+            inbox_mark_processed("twitch", str(twitch_msg_id), ok=True)
+            return JSONResponse({"status": "ok", "matched": matched})
+        except Exception as e:
+            debug_print(f"[EventSub] apply failed: {e!r}")
+            inbox_mark_processed("twitch", str(twitch_msg_id), ok=False, error=str(e))
             return JSONResponse({"status": "ok", "matched": 0})
-
-        now = dt.datetime.now(JST).date()
-
-        for did in dids:
-            info = users.get(did, {}) if isinstance(users.get(did, {}), dict) else {}
-
-            if sub_type == "channel.subscribe":
-                info["is_subscriber"] = True
-                if event.get("tier"):
-                    info["tier"] = event.get("tier")
-                # 初回開始日の候補（ヘッダのタイムスタンプの日付）
-                if not info.get("subscribed_since"):
-                    ts = twitch_msg_ts[:10] if twitch_msg_ts else now.isoformat()
-                    info["subscribed_since"] = ts
-                info["last_verified_at"] = now
-
-            elif sub_type == "channel.subscription.message":
-                # 再サブメッセージに cumulative/streak が含まれる
-                cum = event.get("cumulative_months")
-                if isinstance(cum, int) and cum >= 0:
-                    info["cumulative_months"] = cum
-                # streak_months は int または {"months": int} の場合がある
-                streak_val = event.get("streak_months")
-                if isinstance(streak_val, dict):
-                    sm = streak_val.get("months")
-                    if isinstance(sm, int) and sm >= 0:
-                        info["streak_months"] = sm
-                elif isinstance(streak_val, int) and streak_val >= 0:
-                    info["streak_months"] = streak_val
-
-                if event.get("tier"):
-                    info["tier"] = event.get("tier")
-                info["is_subscriber"] = True
-                info["last_verified_at"] = now
-
-            elif sub_type == "channel.subscription.end":
-                info["is_subscriber"] = False
-                info["last_verified_at"] = now
-
-            users[str(did)] = info
-
-        save_linked_users(users)
-        return JSONResponse({"status": "ok", "matched": len(dids)})
 
     if twitch_msg_type == "revocation":
         debug_print("[EventSub] revoked:", data)

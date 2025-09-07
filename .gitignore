@@ -23,3 +23,5 @@ webadmin/static/
 *.tmp
 *.temp
 nginx.conf
+db.sqlite3-wal
+db.sqlite3-shm

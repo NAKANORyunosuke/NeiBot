@@ -35,7 +35,7 @@ Twitch サブスク状況に応じて Discord 側のロール・チャンネル�
 ```bash
 python -m venv venv
 venv\Scripts\activate
-pip install -r requirement.txt
+ pip install -r requirements.txt
 ```
 
 2) `venv/token.json` を作成
@@ -123,6 +123,56 @@ ngrok http 8000
 
 ---
 
+## ローカルテスト（Python / Jupyter / Twitch CLI なしでも可）
+
+選べる2通りの実行環境を追加しました。
+
+- Jupyter Notebook: `notebooks/NeiBot_EventSub_LocalTests.ipynb`
+  - FastAPI をローカル起動し、署名付きの EventSub 通知を直接POSTして DB 反映を検証します。
+  - Discord Bot は不要で、`venv/token.json` の `twitch_secret_key` を署名に使用します。
+
+- Pythonスクリプト: `scripts/eventsub_local_test.py`
+  - 例: `python scripts/eventsub_local_test.py --start-server`
+  - `--discord-id` と `--twitch-user-id` は任意（既定値あり）。
+
+事前準備
+
+```powershell
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Notebook の実行手順（例）
+
+1) VS Code などで `notebooks/NeiBot_EventSub_LocalTests.ipynb` を開く
+2) 上から順にセルを実行（Webhook 検証→subscribe→message→end）
+3) 最後のセルで `db.sqlite3` の受信履歴を確認
+
+CLI 実行手順（例）
+
+```powershell
+# FastAPI を自動起動しつつ、subscribe→message→end を順番に送信
+python scripts/eventsub_local_test.py --start-server
+```
+
+Twitch CLI を使ったテスト（任意）
+
+```powershell
+# 転送先/secret を設定
+twitch event configure -F http://127.0.0.1:8000/twitch_eventsub -s "<twitch_secret_key>"
+
+# 購読検証
+twitch event verify-subscription channel.subscribe -b <broadcaster_id>
+
+# 通知送信（例）
+twitch event trigger channel.subscribe -b <broadcaster_id> -u <user_id> --tier 1000
+twitch event trigger channel.subscription.message -b <broadcaster_id> -u <user_id> --tier 2000 --cumulative-months 7 --streak-months 4
+twitch event trigger channel.subscription.end -b <broadcaster_id> -u <user_id>
+```
+
+---
+
 ## 本番環境（Nginx）
 
 Windows Server + Nginx + win-acme での構成例です。既存の運用はこの形を想定しています。
@@ -133,7 +183,7 @@ Windows Server + Nginx + win-acme での構成例です。既存の運用はこ�
 winget install Python.Python.3.12
 python -m venv venv
 venv\Scripts\activate
-pip install -r requirement.txt
+ pip install -r requirements.txt
 ```
 
 2) Nginx のセットアップ（Chocolatey 例）
