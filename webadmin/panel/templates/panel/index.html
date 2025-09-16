@@ -1,23 +1,21 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="ja">
-  <head>
-    <link
-      rel="shortcut icon"
-      type="image/png"
-      href="{% static 'favicon.ico' %}"
-    />
-    <meta charset="utf-8" />
-    <title>管理パネル</title>
-  </head>
-  <body>
-    <h1>管理パネル</h1>
-    {% if user.is_authenticated %}
-    <p>{{ user.username }} でログイン中</p>
-    <p><a href="{% url 'broadcast' %}">ロールDM送信</a></p>
-    <p><a href="/accounts/logout/">ログアウト</a></p>
-    {% else %}
-    <p><a href="/accounts/twitch/login/">Twitchでログイン</a></p>
-    {% endif %}
-  </body>
-</html>
+
+{% extends "panel/base.html" %}
+{% block title %}ダッシュボード | NeiBot 管理パネル{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1>ダッシュボード</h1>
+  {% if user.is_authenticated %}
+  <p class="text-muted">{{ user.username }} でログイン中です。</p>
+  <div class="actions">
+    <a class="button-link" href="{% url 'broadcast' %}">ロールDM送信へ移動</a>
+    <a class="button-link" href="/accounts/logout/">ログアウト</a>
+  </div>
+  {% else %}
+  <p class="text-muted">管理機能へアクセスするにはログインしてください。</p>
+  <div class="actions">
+    <a class="button-primary" href="/accounts/twitch/login/">Twitchでログイン</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

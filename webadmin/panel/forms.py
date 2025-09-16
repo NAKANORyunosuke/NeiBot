@@ -1,3 +1,4 @@
+
 from django import forms
 from django.conf import settings
 import requests
@@ -6,11 +7,11 @@ import re
 
 class RoleBroadcastForm(forms.Form):
     guild_id = forms.ChoiceField(label="サーバー", choices=())
-    role_id = forms.ChoiceField(label="ロール", choices=())
+    role_ids = forms.MultipleChoiceField(label="ロール", choices=(), required=False)
     message = forms.CharField(label="メッセージ", widget=forms.Textarea, required=False)
     attachment = forms.FileField(label="添付ファイル", required=False)
 
-    # 8MB 上限（Discord DM の添付上限）
+    # 8MB は Discord DM の添付制限
     MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
     ALLOWED_PLACEHOLDERS = {"user"}
     PLACEHOLDER_RE = re.compile(r"(?<!\{)\{([^\{\}]+)\}(?!\})")
@@ -53,7 +54,9 @@ class RoleBroadcastForm(forms.Form):
                     roles = [(str(r["id"]), r["name"]) for r in data]
             except Exception:
                 roles = []
-        self.fields["role_id"].choices = roles
+        self.fields["role_ids"].choices = roles
+        if not self.is_bound and roles:
+            self.initial.setdefault("role_ids", [roles[0][0]])
 
     def clean_attachment(self):
         f = self.cleaned_data.get("attachment")
@@ -76,6 +79,17 @@ class RoleBroadcastForm(forms.Form):
             allowed = ", ".join(sorted(self.ALLOWED_PLACEHOLDERS))
             uniq_unknown = ", ".join(sorted({u for u in unknown}))
             raise forms.ValidationError(
-                f"不明なプレースホルダがあります: {uniq_unknown}（使用可能: {allowed}）"
+                f"不明なプレースホルダーがあります: {uniq_unknown}。使用可能: {allowed}"
             )
         return msg
+
+    def clean_role_ids(self):
+        values = self.cleaned_data.get("role_ids") or []
+        filtered = [v for v in values if v]
+        if not filtered:
+            raise forms.ValidationError("ロールを1つ以上選択してください。")
+        unique: list[str] = []
+        for v in filtered:
+            if v not in unique:
+                unique.append(v)
+        return unique

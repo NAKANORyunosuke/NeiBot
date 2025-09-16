@@ -1,0 +1,42 @@
+
+{% load static %}
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>{% block title %}NeiBot 管理パネル{% endblock %}</title>
+    <link rel="shortcut icon" type="image/x-icon" href="{% static 'favicon.ico' %}" />
+    <link rel="stylesheet" href="{% static 'panel/css/panel.css' %}" />
+    {% block extra_head %}{% endblock %}
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="brand">NeiBot 管理パネル</div>
+        <nav class="site-nav" aria-label="メインメニュー">
+          <a href="{% url 'index' %}">ダッシュボード</a>
+          <a href="{% url 'broadcast' %}">ロールDM送信</a>
+          {% if user.is_authenticated %}
+          <a href="/accounts/logout/">ログアウト</a>
+          {% else %}
+          <a href="/accounts/twitch/login/">Twitchでログイン</a>
+          {% endif %}
+        </nav>
+      </header>
+
+      <main class="site-main">
+        {% if messages %}
+        <div class="flash-messages" role="status">
+          {% for message in messages %}
+          <div class="flash-message">{{ message }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+      </main>
+
+      <footer class="site-footer">&copy; {% now 'Y' %} NeiBot</footer>
+    </div>
+  </body>
+</html>

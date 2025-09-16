@@ -25,3 +25,5 @@ webadmin/static/
 nginx.conf
 db.sqlite3-wal
 db.sqlite3-shm
+_projects/twitch-discord-bot.md
+_projects/twitch-discord-django.md

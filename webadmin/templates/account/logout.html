@@ -1,0 +1,21 @@
+
+{% extends "panel/base.html" %}
+{% block title %}ログアウト | NeiBot 管理パネル{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1>ログアウト</h1>
+  <p class="text-muted">ログアウトしました。再度利用する場合は下のボタンからログインできます。</p>
+  <form method="post" action="{% url 'account_logout' %}">
+    {% csrf_token %}
+    {% if redirect_field_value %}
+    <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}" />
+    {% endif %}
+    <div class="actions">
+      <button type="submit">ログアウトを確定</button>
+      <a class="button-link" href="{% url 'index' %}">ダッシュボードに戻る</a>
+      <a class="button-primary" href="/accounts/twitch/login/">Twitchでログイン</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

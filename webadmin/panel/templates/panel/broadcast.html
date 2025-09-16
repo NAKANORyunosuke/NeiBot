@@ -1,63 +1,198 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="ja">
-  <head>
-    <link
-      rel="shortcut icon"
-      type="image/png"
-      href="{% static 'favicon.ico' %}"
-    />
-    <meta charset="utf-8" />
-    <title>ロールDM送信</title>
-  </head>
-  <body>
-    <h1>ロールDM送信</h1>
-    <p><a href="/">トップ</a></p>
-    {% if messages %}
-    <ul>
-      {% for m in messages %}
-      <li>{{ m }}</li>
-      {% endfor %}
-    </ul>
-    {% endif %} {% if user.is_authenticated %} {% if user.is_staff %}
-    <form method="post" enctype="multipart/form-data">
-      {% csrf_token %} {% if form.non_field_errors %}
-      <ul style="color: #c00">
-        {% for e in form.non_field_errors %}
-        <li>{{ e }}</li>
+
+{% extends "panel/base.html" %}
+{% block title %}ロールDM送信 | NeiBot 管理パネル{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1>ロールDM送信</h1>
+  <p class="text-muted">
+    対象ロールを選択して、Discordメッセージを一括送信できます。送信前に内容をご確認ください。
+  </p>
+
+  {% if user.is_authenticated %}
+    {% if user.is_staff %}
+    <form method="post" enctype="multipart/form-data" class="form-grid" data-role-form>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <ul class="error-list">
+        {% for error in form.non_field_errors %}
+        <li>{{ error }}</li>
         {% endfor %}
       </ul>
       {% endif %}
-      <div>
+
+      <div class="form-field">
         <label for="id_guild_id">サーバー</label>
         {{ form.guild_id }}
-        <button type="submit" name="refresh" value="1">サーバーを反映</button>
-        {{ form.guild_id.errors }}
+        <div class="helper-text">最新のサーバー情報を読み込み直す場合は下のボタンをご利用ください。</div>
+        <div class="actions">
+          <button type="submit" name="refresh" value="1" class="button-link">サーバーを更新</button>
+        </div>
+        {% if form.guild_id.errors %}
+        <ul class="error-list">
+          {% for error in form.guild_id.errors %}
+          <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
       </div>
-      <div>
-        <label for="id_role_id">ロール</label>
-        {{ form.role_id }} {{ form.role_id.errors }}
+
+      <div class="form-field" data-role-selector>
+        <label>ロール</label>
+        {% with role_values=form.role_ids.value %}
+        <div class="role-select-list" data-role-list>
+          {% if role_values %}
+            {% for value in role_values %}
+            <div class="role-select-item">
+              <select name="role_ids" class="role-select">
+                <option value="" disabled{% if not value %} selected{% endif %}>ロールを選択</option>
+                {% for option_value, option_label in form.fields.role_ids.choices %}
+                <option value="{{ option_value }}"{% if option_value == value %} selected{% endif %}>{{ option_label }}</option>
+                {% endfor %}
+              </select>
+              <button type="button" class="button-link button-ghost" data-remove-role aria-label="ロールを削除">－</button>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="role-select-item">
+              <select name="role_ids" class="role-select">
+                <option value="" disabled selected>ロールを選択</option>
+                {% for option_value, option_label in form.fields.role_ids.choices %}
+                <option value="{{ option_value }}">{{ option_label }}</option>
+                {% endfor %}
+              </select>
+              <button type="button" class="button-link button-ghost" data-remove-role aria-label="ロールを削除">－</button>
+            </div>
+          {% endif %}
+        </div>
+        {% endwith %}
+        <div class="helper-text">複数のロールを選択した場合は、下記の＋ボタンから追加してください。</div>
+        <div class="actions role-actions">
+          <button type="button" class="button-link" data-add-role>＋ ロールを追加</button>
+        </div>
+        {% if form.role_ids.errors %}
+        <ul class="error-list">
+          {% for error in form.role_ids.errors %}
+          <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
       </div>
-      <div>
+
+      <div class="form-field">
         <label for="id_message">メッセージ</label>
         {{ form.message }}
-        <div style="font-size: 0.9em; color: #555">
-          ヒント: メッセージ中の {user}
-          は各メンバーの表示名に置換されます。未対応の {…}
-          が含まれるとエラーになります。
+        <div class="helper-text">
+          メッセージ中の <code>{user}</code> はメンバーの表示名に置き換わります。未対応のプレースホルダーは送信エラーになります。
         </div>
-        {{ form.message.errors }}
+        {% if form.message.errors %}
+        <ul class="error-list">
+          {% for error in form.message.errors %}
+          <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
       </div>
-      <div>
+
+      <div class="form-field">
         <label for="id_attachment">添付ファイル</label>
-        {{ form.attachment }} {{ form.attachment.errors }}
+        {{ form.attachment }}
+        <div class="helper-text">オプション：最大サイズにご注意ください。</div>
+        {% if form.attachment.errors %}
+        <ul class="error-list">
+          {% for error in form.attachment.errors %}
+          <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
       </div>
-      <button type="submit">送信</button>
+
+      <div class="actions">
+        <button type="submit">送信</button>
+      </div>
     </form>
+
+    <template id="role-select-template">
+      <div class="role-select-item">
+        <select name="role_ids" class="role-select">
+          <option value="" disabled selected>ロールを選択</option>
+          {% for option_value, option_label in form.fields.role_ids.choices %}
+          <option value="{{ option_value }}">{{ option_label }}</option>
+          {% endfor %}
+        </select>
+        <button type="button" class="button-link button-ghost" data-remove-role aria-label="ロールを削除">－</button>
+      </div>
+    </template>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const listEl = document.querySelector('[data-role-list]');
+        const addBtn = document.querySelector('[data-add-role]');
+        const template = document.getElementById('role-select-template');
+        if (!listEl || !addBtn || !template) {
+          return;
+        }
+
+        const updateRemoveButtons = () => {
+          const buttons = listEl.querySelectorAll('[data-remove-role]');
+          const disable = buttons.length <= 1;
+          buttons.forEach((btn) => {
+            btn.disabled = disable;
+            btn.classList.toggle('is-disabled', disable);
+          });
+        };
+
+        const addRoleSelect = (value = '') => {
+          const fragment = template.content.cloneNode(true);
+          const item = fragment.querySelector('.role-select-item');
+          const selectEl = item.querySelector('select');
+          if (value) {
+            selectEl.value = value;
+            if (selectEl.value !== value) {
+              const option = document.createElement('option');
+              option.value = value;
+              option.textContent = value;
+              option.selected = true;
+              selectEl.appendChild(option);
+            }
+          }
+          listEl.appendChild(item);
+          updateRemoveButtons();
+        };
+
+        addBtn.addEventListener('click', () => {
+          addRoleSelect();
+        });
+
+        listEl.addEventListener('click', (event) => {
+          const target = event.target.closest('[data-remove-role]');
+          if (!target) {
+            return;
+          }
+          if (target.disabled) {
+            return;
+          }
+          const item = target.closest('.role-select-item');
+          if (item) {
+            item.remove();
+          }
+          if (!listEl.querySelector('.role-select-item')) {
+            addRoleSelect();
+          } else {
+            updateRemoveButtons();
+          }
+        });
+
+        updateRemoveButtons();
+      });
+    </script>
     {% else %}
-    <p>このページへアクセスする権限がありません。</p>
-    {% endif %} {% else %}
-    <p><a href="/accounts/twitch/login/">Twitchでログイン</a></p>
+    <p class="text-muted">このページへアクセスする権限がありません。</p>
     {% endif %}
-  </body>
-</html>
+  {% else %}
+  <div class="actions">
+    <a class="button-primary" href="/accounts/twitch/login/">Twitchでログイン</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
