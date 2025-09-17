@@ -183,6 +183,8 @@ def reconcile_and_save_link(
 
     # 付帯メタ情報
     updated["resolved"] = True
+    updated["roles_revoked"] = False
+    updated["roles_revoked_at"] = None
     updated["first_notice_at"] = None
     updated["last_verified_at"] = today or datetime.datetime.now(JST).date()
     # 直近のリンク完了日（OAuth完了のタイミング）として更新

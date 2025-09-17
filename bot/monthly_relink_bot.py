@@ -69,7 +69,11 @@ def mark_resolved(discord_id: str) -> None:
     既存のOAuthコールバックや検証処理から利用してください。
     """
     did = str(discord_id)
-    patch_linked_user(did, {"resolved": True})
+    patch_linked_user(
+        did,
+        {"resolved": True, "roles_revoked": False, "roles_revoked_at": None},
+        include_none=True,
+    )
 
 
 # ========= Cog 実装 =========
@@ -80,6 +84,59 @@ class ReLinkCog(commands.Cog):
         self.bot = bot
         self.scheduler = AsyncIOScheduler(timezone="Asia/Tokyo")
         self._scheduler_started = False
+
+    async def _revoke_link_roles(
+        self, discord_id: str, role_map: dict[str, dict[str, int]] | None = None
+    ) -> bool:
+        if role_map is None:
+            role_map = load_role_ids() or {}
+        removed_any = False
+        try:
+            discord_int = int(discord_id)
+        except (TypeError, ValueError):
+            return False
+
+        for guild in self.bot.guilds:
+            role_conf = (role_map or {}).get(str(guild.id))
+            if not role_conf:
+                continue
+            try:
+                member = guild.get_member(discord_int) or await guild.fetch_member(discord_int)
+            except (discord.NotFound, discord.Forbidden):
+                continue
+            except discord.HTTPException:
+                continue
+
+            target_role_ids: set[int] = set()
+            for rid in role_conf.values():
+                if isinstance(rid, int):
+                    target_role_ids.add(rid)
+                else:
+                    try:
+                        target_role_ids.add(int(rid))
+                    except (TypeError, ValueError):
+                        continue
+            if not target_role_ids:
+                continue
+
+            roles_to_remove = [role for role in member.roles if role.id in target_role_ids]
+            if not roles_to_remove:
+                continue
+
+            try:
+                await member.remove_roles(
+                    *roles_to_remove, reason="Twitch link: revoke roles (unresolved)"
+                )
+                removed_any = True
+            except discord.Forbidden:
+                continue
+            except discord.HTTPException:
+                continue
+
+            if removed_any:
+                break
+
+        return removed_any
 
     # ===== スケジュール本体 =====
     async def notify_monthly_relink(self, *, force: bool = False) -> None:
@@ -113,6 +170,7 @@ class ReLinkCog(commands.Cog):
     async def resend_after_7days_if_unlinked(self) -> None:
         now = jst_now()
         users = load_users()
+        role_map = load_role_ids() or {}
         resend_cnt = 0
 
         # 値が辞書でない（誤って混入した）トップレベルキーを無視
@@ -150,6 +208,13 @@ class ReLinkCog(commands.Cog):
                     pass
             else:
                 lu["resolved"] = False
+
+            revoked = await self._revoke_link_roles(discord_id, role_map=role_map)
+            if revoked:
+                patch_linked_user(
+                    str(discord_id),
+                    {"roles_revoked": True, "roles_revoked_at": now.isoformat()},
+                )
 
             ok = await send_dm(
                 self.bot, int(discord_id), build_relink_message(discord_id)
