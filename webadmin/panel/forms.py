@@ -93,3 +93,17 @@ class RoleBroadcastForm(forms.Form):
             if v not in unique:
                 unique.append(v)
         return unique
+
+class SubscriberImportForm(forms.Form):
+    file = forms.FileField(
+        label="TwitchサブスクライバCSV",
+        help_text="subscriber-list.csv をそのままアップロードしてください。"
+    )
+
+    def clean_file(self):
+        f = self.cleaned_data.get("file")
+        if not f:
+            return f
+        if f.size and f.size > 5 * 1024 * 1024:
+            raise forms.ValidationError("ファイルサイズは5MB以下にしてください。")
+        return f

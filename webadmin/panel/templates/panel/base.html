@@ -18,6 +18,7 @@
           {% if user.is_authenticated %}
           {% if user.is_staff %}
           <a href="{% url 'index' %}">ダッシュボード</a>
+          <a href="{% url 'import_subscribers' %}">サブスクCSV</a>
           {% endif %}
           <a href="{% url 'self_service' %}">リンク状況確認</a>
           {% if user.is_staff %}

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import datetime as dt
 from collections import Counter
+import csv
+import io
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -9,13 +11,14 @@ import requests
 from allauth.socialaccount.models import SocialAccount
 from django.conf import settings
 from django.contrib import messages
+from django.db import transaction
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 
-from .forms import RoleBroadcastForm
+from .forms import RoleBroadcastForm, SubscriberImportForm
 from .models import LinkedUser, WebhookEvent
 
 TIER_LABELS: List[Tuple[str, str]] = [
@@ -516,6 +519,195 @@ def self_service(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def import_subscribers(request: HttpRequest) -> HttpResponse:
+    if not request.user.is_staff:
+        return HttpResponseForbidden("このページへアクセスする権限がありません。")
+
+    form = SubscriberImportForm(request.POST or None, request.FILES or None)
+    report: Dict[str, Any] | None = None
+
+    if request.method == "POST" and form.is_valid():
+        upload = form.cleaned_data["file"]
+        try:
+            upload.seek(0)
+        except Exception:
+            pass
+        try:
+            raw_bytes = upload.read()
+        except Exception:
+            raw_bytes = b""
+        if isinstance(raw_bytes, str):
+            raw_text = raw_bytes
+        else:
+            raw_text = raw_bytes.decode("utf-8-sig", errors="ignore")
+        stream = io.StringIO(raw_text)
+        reader = csv.reader(stream)
+        try:
+            header = next(reader)
+        except StopIteration:
+            header = []
+        header = [str(h or "").strip().lstrip("\ufeff").lower() for h in header]
+
+        rows: List[Dict[str, str]] = []
+        for row in reader:
+            if not any((cell or "").strip() for cell in row):
+                continue
+            data: Dict[str, str] = {}
+            for idx, key in enumerate(header):
+                value = row[idx] if idx < len(row) else ""
+                data[key] = (value or "").strip()
+            rows.append(data)
+
+        users = list(LinkedUser.objects.all())
+        index_by_username: Dict[str, LinkedUser] = {}
+        for linked in users:
+            data = linked.data if isinstance(linked.data, dict) else {}
+            username = str(data.get("twitch_username") or "").strip().lower()
+            if username and username not in index_by_username:
+                index_by_username[username] = linked
+
+        now = timezone.now()
+        today_iso = timezone.localdate().isoformat()
+
+        report = {
+            "total": len(rows),
+            "updated": 0,
+            "skipped": [],
+            "not_found": [],
+            "errors": [],
+        }
+
+        def _parse_int(value: str) -> Optional[int]:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        def _parse_bool(value: str) -> Optional[bool]:
+            if value is None:
+                return None
+            normalized = value.strip().lower()
+            if not normalized:
+                return None
+            if normalized in {"1", "true", "yes", "y", "founder"}:
+                return True
+            if normalized in {"0", "false", "no", "n"}:
+                return False
+            return None
+
+        def _parse_date(value: str) -> Optional[dt.date]:
+            if not value:
+                return None
+            value = value.strip()
+            parsed = parse_date(value)
+            if parsed:
+                return parsed
+            try:
+                return dt.datetime.fromisoformat(value).date()
+            except Exception:
+                pass
+            for fmt in ("%Y/%m/%d", "%d/%m/%Y", "%m/%d/%Y", "%b %d, %Y", "%B %d, %Y"):
+                try:
+                    return dt.datetime.strptime(value, fmt).date()
+                except Exception:
+                    continue
+            return None
+
+        def _parse_tier(value: str) -> Optional[str]:
+            if not value:
+                return None
+            normalized = value.strip().lower()
+            if not normalized:
+                return None
+            mapping = {
+                "1": "1000",
+                "tier 1": "1000",
+                "tier1": "1000",
+                "prime": "1000",
+                "2": "2000",
+                "tier 2": "2000",
+                "tier2": "2000",
+                "3": "3000",
+                "tier 3": "3000",
+                "tier3": "3000",
+            }
+            if normalized in mapping:
+                return mapping[normalized]
+            digits = "".join(ch for ch in normalized if ch.isdigit())
+            if digits == "1":
+                return "1000"
+            if digits == "2":
+                return "2000"
+            if digits == "3":
+                return "3000"
+            return None
+
+        with transaction.atomic():
+            for row_data in rows:
+                username_raw = row_data.get("username") or row_data.get("user name")
+                username = (username_raw or "").strip()
+                if not username:
+                    report["skipped"].append({"row": row_data, "reason": "Usernameが空"})
+                    continue
+                linked = index_by_username.get(username.lower())
+                if not linked:
+                    report["not_found"].append(username)
+                    continue
+
+                current_data = linked.data if isinstance(linked.data, dict) else {}
+                current_data = dict(current_data)
+                current_data["twitch_username"] = username
+
+                tier_code = _parse_tier(row_data.get("current tier", ""))
+                tenure = _parse_int(row_data.get("tenure", ""))
+                streak = _parse_int(row_data.get("streak", ""))
+                sub_type = row_data.get("sub type") or row_data.get("subtype")
+                founder_flag = _parse_bool(row_data.get("founder", ""))
+                started = _parse_date(row_data.get("subscribe date", ""))
+
+                if tier_code:
+                    current_data["tier"] = tier_code
+                if tenure is not None:
+                    current_data["cumulative_months"] = tenure
+                if streak is not None:
+                    current_data["streak_months"] = streak
+                if sub_type:
+                    current_data["subscriber_type"] = sub_type
+                if founder_flag is not None:
+                    current_data["is_founder"] = founder_flag
+                if started is not None:
+                    current_data["subscribed_since"] = started.isoformat()
+
+                current_data["is_subscriber"] = True
+                current_data["last_verified_at"] = today_iso
+                current_data["resolved"] = True
+                current_data["roles_revoked"] = False
+                current_data["roles_revoked_at"] = None
+                current_data["subscriber_list_synced_at"] = now.isoformat()
+
+                try:
+                    linked.data = current_data
+                    linked.updated_at = now.isoformat()
+                    linked.save(update_fields=["data", "updated_at"])
+                    report["updated"] += 1
+                except Exception as exc:
+                    report["errors"].append({"username": username, "error": str(exc)})
+
+        if report["updated"]:
+            messages.success(
+                request,
+                f"{report['updated']}件のユーザー情報を更新しました。",
+            )
+        elif not report["errors"]:
+            messages.info(request, "更新対象となるユーザーが見つかりませんでした。")
+
+    return render(
+        request,
+        "panel/import_subscribers.html",
+        {"form": form, "report": report},
+    )
+
+@login_required
 def broadcast(request: HttpRequest) -> HttpResponse:
     if not request.user.is_staff:
         return HttpResponseForbidden("このページへアクセスする権限がありません。")
@@ -615,3 +807,10 @@ def broadcast(request: HttpRequest) -> HttpResponse:
         "panel/broadcast.html",
         {"form": form, "twitch_account": twitch_account},
     )
+
+
+
+
+
+
+

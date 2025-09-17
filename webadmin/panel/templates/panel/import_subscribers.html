@@ -1,0 +1,76 @@
+﻿{% extends "panel/base.html" %}
+{% block title %}サブスクCSV取り込み | NeiBot 管理パネル{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h1>サブスクCSVインポート</h1>
+  <p class="text-muted">Twitch の subscriber-list.csv をアップロードすると、既存の連携ユーザー情報を更新します。</p>
+
+  <form method="post" enctype="multipart/form-data" class="form">
+    {% csrf_token %}
+    <div class="form-field">
+      {{ form.file.label_tag }}
+      {{ form.file }}
+      {% if form.file.help_text %}
+      <p class="text-muted small">{{ form.file.help_text }}</p>
+      {% endif %}
+      {% for error in form.file.errors %}
+      <p class="form-error">{{ error }}</p>
+      {% endfor %}
+    </div>
+    <div class="actions">
+      <button type="submit" class="button-primary">CSVを取り込む</button>
+    </div>
+  </form>
+
+  {% if report %}
+  <div class="status-section">
+    <h2>インポート結果</h2>
+    <dl class="data-list">
+      <div>
+        <dt>読み込み件数</dt>
+        <dd>{{ report.total }}</dd>
+      </div>
+      <div>
+        <dt>更新件数</dt>
+        <dd>{{ report.updated }}</dd>
+      </div>
+      <div>
+        <dt>未一致</dt>
+        <dd>{% if report.not_found %}{{ report.not_found|length }}{% else %}0{% endif %}</dd>
+      </div>
+      <div>
+        <dt>エラー</dt>
+        <dd>{% if report.errors %}{{ report.errors|length }}{% else %}0{% endif %}</dd>
+      </div>
+    </dl>
+
+    {% if report.not_found %}
+    <div class="status-section">
+      <h3>マッチしなかったユーザー</h3>
+      <p class="text-muted">Discord 側で Twitch ユーザー名が一致する連携ユーザーが見つかりませんでした。</p>
+      <ul class="status-list">
+        {% for name in report.not_found|slice:":20" %}
+        <li>{{ name }}</li>
+        {% endfor %}
+      </ul>
+      {% if report.not_found|length > 20 %}
+      <p class="text-muted">他 {{ report.not_found|length|add:-20 }} 件</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if report.errors %}
+    <div class="status-section">
+      <h3>更新エラー</h3>
+      <ul class="status-list">
+        {% for item in report.errors %}
+        <li>{{ item.username }}: {{ item.error }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
