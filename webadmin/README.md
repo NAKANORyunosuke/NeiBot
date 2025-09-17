@@ -32,6 +32,8 @@ python manage.py runserver 127.0.0.1:8001
 Usage
 - Open http://127.0.0.1:8001
 - Login with Twitch (Allauth). Allowed logins are promoted to staff automatically.
+- The top page now shows an operations dashboard (EventSub health, reminder counts, etc.).
+- `/status/` exposes a self-service page where logged-in viewers can check their latest link state.
 - Open “ロールDM送信”, select a role, enter message, optionally add a file, and submit.
 
 Notes

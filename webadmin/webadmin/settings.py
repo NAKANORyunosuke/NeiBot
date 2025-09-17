@@ -113,10 +113,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # allauth
 SITE_ID = 1
 LOGIN_URL = "/accounts/login/"
-LOGIN_REDIRECT_URL = "/broadcast/"
+LOGIN_REDIRECT_URL = "/"
 # Ensure allauth also uses the same redirect
 ACCOUNT_LOGIN_REDIRECT_URL = LOGIN_REDIRECT_URL
-LOGOUT_REDIRECT_URL = "/broadcast/"
+LOGOUT_REDIRECT_URL = "/"
 ACCOUNT_LOGOUT_REDIRECT_URL = LOGOUT_REDIRECT_URL
 
 AUTHENTICATION_BACKENDS = (

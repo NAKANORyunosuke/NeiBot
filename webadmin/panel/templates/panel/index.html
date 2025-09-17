@@ -1,21 +1,235 @@
-
 {% extends "panel/base.html" %}
-{% block title %}ダッシュボード | NeiBot 管理パネル{% endblock %}
+{% block title %}運用ダッシュボード | NeiBot 管理パネル{% endblock %}
 
 {% block content %}
-<div class="card">
-  <h1>ダッシュボード</h1>
-  {% if user.is_authenticated %}
-  <p class="text-muted">{{ user.username }} でログイン中です。</p>
-  <div class="actions">
-    <a class="button-link" href="{% url 'broadcast' %}">ロールDM送信へ移動</a>
-    <a class="button-link" href="/accounts/logout/">ログアウト</a>
+{% if user.is_authenticated %}
+  {% if dashboard %}
+  <div class="card">
+    <h1>運用ダッシュボード</h1>
+    <p class="text-muted">Twitch 連携とリマインド運用の最新状況を確認できます。</p>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">連携済みユーザー</div>
+        <div class="stat-value">{{ dashboard.user_stats.total }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">アクティブ（サブスク）</div>
+        <div class="stat-value">{{ dashboard.user_stats.active }}</div>
+        <div class="stat-subtext">{{ dashboard.user_stats.active_ratio }}%</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">今月確認済み</div>
+        <div class="stat-value">{{ dashboard.user_stats.verified_this_month }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">要再リンク</div>
+        <div class="stat-value">{{ dashboard.user_stats.pending_relink }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">DM エラー</div>
+        <div class="stat-value">{{ dashboard.user_stats.dm_failures }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">最終更新</div>
+        <div class="stat-value">
+          {% if dashboard.user_stats.last_updated %}
+            {{ dashboard.user_stats.last_updated|date:"n月j日 H:i" }}
+          {% else %}
+            –
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="tier-breakdown">
+      <h2 class="section-title">Tier 内訳</h2>
+      <ul class="tier-list">
+        {% for tier in dashboard.tier_breakdown %}
+        <li>
+          <span class="tier-label">{{ tier.label }}</span>
+          <span class="tier-count">{{ tier.count }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>リマインド状況</h2>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">今月送信済み</div>
+        <div class="stat-value">{{ dashboard.reminder_stats.reminders_sent_this_month }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">7日以上未解決</div>
+        <div class="stat-value">{{ dashboard.reminder_stats.pending_over_7_days }}</div>
+      </div>
+    </div>
+
+    {% if dashboard.unresolved_samples %}
+    <div class="status-section">
+      <h3>未解決ユーザー（抜粋）</h3>
+      <ul class="status-list">
+        {% for sample in dashboard.unresolved_samples %}
+        <li>
+          <div class="status-header">
+            <span class="status-title">Discord ID: <code>{{ sample.discord_id }}</code></span>
+            {% if sample.twitch_username %}
+            <span class="status-meta">Twitch: {{ sample.twitch_username }}</span>
+            {% endif %}
+          </div>
+          <div class="status-body">
+            {% if sample.last_notice_at %}
+            <span>最終通知: {{ sample.last_notice_at|date:"n月j日 H:i" }}</span>
+            {% else %}
+            <span>最終通知: –</span>
+            {% endif %}
+            {% if sample.days_since_notice is not None %}
+            <span>（{{ sample.days_since_notice }} 日前）</span>
+            {% endif %}
+            {% if sample.last_verified_at %}
+            <span> / 最終確認: {{ sample.last_verified_at|date:"n月j日" }}</span>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if dashboard.dm_failure_samples %}
+    <div class="status-section">
+      <h3>DM エラー（最近5件）</h3>
+      <ul class="status-list">
+        {% for sample in dashboard.dm_failure_samples %}
+        <li>
+          <div class="status-header">
+            <span class="status-title">Discord ID: <code>{{ sample.discord_id }}</code></span>
+            {% if sample.twitch_username %}
+            <span class="status-meta">Twitch: {{ sample.twitch_username }}</span>
+            {% endif %}
+          </div>
+          <div class="status-body">
+            {% if sample.updated_at %}
+            <span>最終更新: {{ sample.updated_at|date:"n月j日 H:i" }}</span>
+            {% else %}
+            <span>最終更新: –</span>
+            {% endif %}
+            {% if sample.reason %}
+            <span class="status-note">理由: {{ sample.reason }}</span>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>EventSub 受信ログ</h2>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">保留中</div>
+        <div class="stat-value">{{ dashboard.event_stats.pending }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">エラー</div>
+        <div class="stat-value">{{ dashboard.event_stats.failed }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">直近24時間</div>
+        <div class="stat-value">{{ dashboard.event_stats.events_last_24h }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">直近7日間</div>
+        <div class="stat-value">{{ dashboard.event_stats.events_last_7d }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">最終受信</div>
+        <div class="stat-value">
+          {% if dashboard.event_stats.last_event_at %}
+            {{ dashboard.event_stats.last_event_at|date:"n月j日 H:i" }}
+          {% else %}
+            –
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    {% if dashboard.recent_events %}
+    <div class="table-wrapper">
+      <table class="event-table">
+        <thead>
+          <tr>
+            <th>受信日時</th>
+            <th>イベント</th>
+            <th>Twitch ID</th>
+            <th>ステータス</th>
+            <th>リトライ</th>
+            <th>エラー</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in dashboard.recent_events %}
+          <tr>
+            <td>{% if event.received_at %}{{ event.received_at|date:"n月j日 H:i" }}{% else %}–{% endif %}</td>
+            <td>{{ event.event_type }}</td>
+            <td>{% if event.twitch_user_id %}{{ event.twitch_user_id }}{% else %}–{% endif %}</td>
+            <td><span class="status-badge is-{{ event.status_level }}">{{ event.status }}</span></td>
+            <td>{{ event.retries }}</td>
+            <td>{% if event.error %}<span class="text-muted">{{ event.error|truncatechars:40 }}</span>{% else %}–{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted">受信ログはまだありません。</p>
+    {% endif %}
+
+    {% if dashboard.recent_failures %}
+    <div class="status-section">
+      <h3>直近のエラー</h3>
+      <ul class="status-list">
+        {% for failure in dashboard.recent_failures %}
+        <li>
+          <div class="status-header">
+            <span class="status-title">Delivery ID: <code>{{ failure.delivery_id }}</code></span>
+            <span class="status-meta">{{ failure.event_type }}</span>
+          </div>
+          <div class="status-body">
+            {% if failure.received_at %}
+            <span>受信: {{ failure.received_at|date:"n月j日 H:i" }}</span>
+            {% endif %}
+            {% if failure.retries %}
+            <span> / リトライ: {{ failure.retries }}</span>
+            {% endif %}
+            {% if failure.error %}
+            <span class="status-note">{{ failure.error }}</span>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
   </div>
   {% else %}
-  <p class="text-muted">管理機能へアクセスするにはログインしてください。</p>
-  <div class="actions">
-    <a class="button-primary" href="/accounts/twitch/login/">Twitchでログイン</a>
+  <div class="card">
+    <h1>ダッシュボード</h1>
+    <p class="text-muted">このアカウントにはダッシュボードへのアクセス権がありません。</p>
   </div>
   {% endif %}
-</div>
+{% else %}
+  <div class="card">
+    <h1>NeiBot 管理パネルへようこそ</h1>
+    <p class="text-muted">運用状況を確認したり、ロール DM を送信するには Twitch でログインしてください。</p>
+    <div class="actions">
+      <a class="button-primary" href="/accounts/twitch/login/">Twitchでログイン</a>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}
