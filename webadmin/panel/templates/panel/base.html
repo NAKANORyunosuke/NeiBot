@@ -15,8 +15,11 @@
         <div class="brand">NeiBot 管理パネル</div>
         <nav class="site-nav" aria-label="メインメニュー">
           <a href="{% url 'index' %}">ダッシュボード</a>
-          <a href="{% url 'broadcast' %}">ロールDM送信</a>
           {% if user.is_authenticated %}
+          <a href="{% url 'self_service' %}">リンク状況確認</a>
+          {% if user.is_staff %}
+          <a href="{% url 'broadcast' %}">ロールDM送信</a>
+          {% endif %}
           <a href="/accounts/logout/">ログアウト</a>
           {% else %}
           <a href="/accounts/twitch/login/">Twitchでログイン</a>

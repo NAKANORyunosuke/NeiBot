@@ -1,0 +1,180 @@
+{% extends "panel/base.html" %}
+{% block title %}リンク状況の確認 | NeiBot 管理パネル{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1>リンク状況の確認</h1>
+  {% if twitch_profile.display_name or twitch_profile.login %}
+  <div class="profile-summary">
+    {% if twitch_profile.profile_image_url %}
+    <img class="profile-avatar" src="{{ twitch_profile.profile_image_url }}" alt="Twitch アイコン" loading="lazy" />
+    {% endif %}
+    <div>
+      <div class="profile-name">{{ twitch_profile.display_name|default:twitch_profile.login }}</div>
+      {% if twitch_profile.login %}
+      <div class="text-muted">ログイン名: {{ twitch_profile.login }}</div>
+      {% endif %}
+      {% if twitch_profile.id %}
+      <div class="text-muted">Twitch ID: {{ twitch_profile.id }}</div>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <p class="text-muted">Twitch アカウント情報を取得できませんでした。</p>
+  {% endif %}
+  <p class="text-muted">
+    Discord サーバーで <code>/link</code> を実行すると、最新のサブスク状態がこのページに反映されます。
+  </p>
+</div>
+
+{% if linked_entries %}
+<div class="status-grid">
+  {% for entry in linked_entries %}
+  <article class="status-card">
+    <header class="status-card-header">
+      <div>
+        <h2>Discord ID: <a href="{{ entry.discord_profile_url }}" target="_blank" rel="noopener">{{ entry.discord_id }}</a></h2>
+        {% if entry.twitch_username %}
+        <p class="text-muted">Twitch: {{ entry.twitch_username }}</p>
+        {% endif %}
+      </div>
+      <div class="status-badges">
+        {% for badge in entry.status_badges %}
+        <span class="status-badge is-{{ badge.level }}">{{ badge.label }}</span>
+        {% endfor %}
+      </div>
+    </header>
+    <div class="status-card-body">
+      <dl class="data-list">
+        <div>
+          <dt>Tier</dt>
+          <dd>{{ entry.tier_label }}</dd>
+        </div>
+        <div>
+          <dt>連続月数</dt>
+          <dd>{{ entry.streak_months }} ヶ月</dd>
+        </div>
+        <div>
+          <dt>累計月数</dt>
+          <dd>{{ entry.cumulative_months }} ヶ月</dd>
+        </div>
+        {% if entry.bits_score or entry.bits_rank %}
+        <div>
+          <dt>Bits</dt>
+          <dd>
+            {% if entry.bits_score %}{{ entry.bits_score }} pt{% endif %}
+            {% if entry.bits_rank %}（順位: {{ entry.bits_rank }}）{% endif %}
+          </dd>
+        </div>
+        {% endif %}
+        <div>
+          <dt>サブスク開始</dt>
+          <dd>
+            {% if entry.subscribed_since %}
+              {{ entry.subscribed_since|date:"Y年n月j日" }}
+            {% else %}
+              –
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt>最終確認</dt>
+          <dd>
+            {% if entry.last_verified_at %}
+              {{ entry.last_verified_at|date:"Y年n月j日" }}
+            {% else %}
+              未確認
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt>次回目安</dt>
+          <dd>
+            {% if entry.next_due_date %}
+              {{ entry.next_due_date|date:"Y年n月j日" }}
+              {% if entry.days_until_due is not None %}
+                （
+                {% if entry.days_until_due > 0 %}
+                  あと {{ entry.days_until_due }} 日
+                {% elif entry.days_until_due == 0 %}
+                  本日
+                {% else %}
+                  {{ entry.days_until_due_abs }} 日前
+                {% endif %}
+                ）
+              {% endif %}
+            {% else %}
+              –
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt>最終通知</dt>
+          <dd>
+            {% if entry.last_notice_at %}
+              {{ entry.last_notice_at|date:"Y年n月j日 H:i" }}
+              {% if entry.days_since_notice is not None %}
+                （{{ entry.days_since_notice }} 日前）
+              {% endif %}
+            {% else %}
+              –
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt>初回通知</dt>
+          <dd>
+            {% if entry.first_notice_at %}
+              {{ entry.first_notice_at|date:"Y年n月j日 H:i" }}
+            {% else %}
+              –
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt>最終更新</dt>
+          <dd>
+            {% if entry.updated_at %}
+              {{ entry.updated_at|date:"Y年n月j日 H:i" }}
+            {% else %}
+              –
+            {% endif %}
+          </dd>
+        </div>
+      </dl>
+
+      {% if entry.status_notes %}
+      <div class="note-section">
+        <h3>アクションのヒント</h3>
+        <ul class="note-list">
+          {% for note in entry.status_notes %}
+          <li>{{ note }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">
+  <h2>リンク情報が見つかりませんでした</h2>
+  <p class="text-muted">まだ Discord との連携が完了していないか、別の Twitch アカウントでログインしている可能性があります。</p>
+  <ol class="guide-list">
+    <li>Discord サーバーに参加し、サーバー内で <code>/link</code> コマンドを実行してください。</li>
+    <li>Bot からの DM が届かない場合は、Discord のプライバシー設定で「サーバーのメンバーからのダイレクトメッセージを許可する」をオンにしてください。</li>
+    <li>リンク後も反映されない場合は、数分待ってからこのページを再読み込みしてください。</li>
+  </ol>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>セルフヘルプ</h2>
+  <ol class="guide-list">
+    <li>月初に <code>/link</code> を再実行すると、サブスク特典を継続できます。</li>
+    <li>再リンク DM が届かないときは、DM 設定やサーバーのミュート設定をご確認ください。</li>
+    <li>状況が改善しない場合は、運営チームまで Discord でご連絡ください。</li>
+  </ol>
+</div>
+{% endblock %}
