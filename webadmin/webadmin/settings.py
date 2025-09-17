@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 from pathlib import Path
 
@@ -113,7 +113,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # allauth
 SITE_ID = 1
 LOGIN_URL = "/accounts/login/"
-LOGIN_REDIRECT_URL = "/"
+LOGIN_REDIRECT_URL = "/status/"
 # Ensure allauth also uses the same redirect
 ACCOUNT_LOGIN_REDIRECT_URL = LOGIN_REDIRECT_URL
 LOGOUT_REDIRECT_URL = "/"
@@ -185,3 +185,4 @@ except Exception:
 
 if not BOT_ADMIN_API_BASE:
     BOT_ADMIN_API_BASE = "http://127.0.0.1:8000"
+

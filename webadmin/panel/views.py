@@ -182,24 +182,43 @@ def _build_dashboard_context() -> Dict[str, Any]:
             latest_update = updated_at
 
     user_stats["last_updated"] = _to_local(latest_update)
-    if user_stats["total"]:
+    total_users = user_stats["total"]
+    if total_users:
         user_stats["active_ratio"] = round(
-            (user_stats["active"] / user_stats["total"]) * 100, 1
+            (user_stats["active"] / total_users) * 100, 1
+        )
+        user_stats["verified_ratio"] = round(
+            (user_stats["verified_this_month"] / total_users) * 100, 1
+        )
+        user_stats["pending_relink_ratio"] = round(
+            (user_stats["pending_relink"] / total_users) * 100, 1
+        )
+        user_stats["dm_failure_ratio"] = round(
+            (user_stats["dm_failures"] / total_users) * 100, 1
         )
     else:
         user_stats["active_ratio"] = 0
+        user_stats["verified_ratio"] = 0
+        user_stats["pending_relink_ratio"] = 0
+        user_stats["dm_failure_ratio"] = 0
 
     tier_breakdown: List[Dict[str, Any]] = []
     counted = 0
     for code, label in TIER_LABELS:
         count = tier_counter.get(code, 0)
         counted += count
-        tier_breakdown.append({"code": code, "label": label, "count": count})
+        percent = round((count / total_users) * 100, 1) if total_users else 0
+        tier_breakdown.append(
+            {"code": code, "label": label, "count": count, "percent": percent}
+        )
+    remaining = max(total_users - counted, 0)
+    remaining_percent = round((remaining / total_users) * 100, 1) if total_users else 0
     tier_breakdown.append(
         {
             "code": "none",
             "label": "未サブスク",
-            "count": max(user_stats["total"] - counted, 0),
+            "count": remaining,
+            "percent": remaining_percent,
         }
     )
 
@@ -447,11 +466,14 @@ def index(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated and not request.user.is_staff:
         return redirect("self_service")
 
-    dashboard = None
-    if request.user.is_authenticated and request.user.is_staff:
-        dashboard = _build_dashboard_context()
+    can_view_dashboard = request.user.is_authenticated and request.user.is_staff
+    dashboard = _build_dashboard_context() if can_view_dashboard else None
 
-    return render(request, "panel/index.html", {"dashboard": dashboard})
+    return render(
+        request,
+        "panel/index.html",
+        {"dashboard": dashboard, "can_view_dashboard": can_view_dashboard},
+    )
 
 
 @login_required

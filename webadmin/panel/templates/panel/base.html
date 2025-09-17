@@ -1,10 +1,11 @@
-
+﻿
 {% load static %}
 <!DOCTYPE html>
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
     <title>{% block title %}NeiBot 管理パネル{% endblock %}</title>
+    <link rel="icon" type="image/x-icon" sizes="any" href="{% static 'favicon.ico' %}" />
     <link rel="shortcut icon" type="image/x-icon" href="{% static 'favicon.ico' %}" />
     <link rel="stylesheet" href="{% static 'panel/css/panel.css' %}" />
     {% block extra_head %}{% endblock %}
@@ -14,8 +15,10 @@
       <header class="site-header">
         <div class="brand">NeiBot 管理パネル</div>
         <nav class="site-nav" aria-label="メインメニュー">
-          <a href="{% url 'index' %}">ダッシュボード</a>
           {% if user.is_authenticated %}
+          {% if user.is_staff %}
+          <a href="{% url 'index' %}">ダッシュボード</a>
+          {% endif %}
           <a href="{% url 'self_service' %}">リンク状況確認</a>
           {% if user.is_staff %}
           <a href="{% url 'broadcast' %}">ロールDM送信</a>
@@ -43,3 +46,5 @@
     </div>
   </body>
 </html>
+
+

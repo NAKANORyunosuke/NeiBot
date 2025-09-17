@@ -1,76 +1,133 @@
-{% extends "panel/base.html" %}
+﻿{% extends "panel/base.html" %}
 {% block title %}運用ダッシュボード | NeiBot 管理パネル{% endblock %}
 
 {% block content %}
 {% if user.is_authenticated %}
-  {% if dashboard %}
-  <div class="card">
-    <h1>運用ダッシュボード</h1>
-    <p class="text-muted">Twitch 連携とリマインド運用の最新状況を確認できます。</p>
+  {% if can_view_dashboard %}
+  <section class="card dashboard-card">
+    <div class="dashboard-header">
+      <div>
+        <h1>運用ダッシュボード</h1>
+        <p class="text-muted">Twitch 連携とリマインド運用の最新状況を確認できます。</p>
+      </div>
+      <div class="dashboard-meta">
+        <span class="pill-label">最終更新</span>
+        {% if dashboard.user_stats.last_updated %}
+        <time datetime="{{ dashboard.user_stats.last_updated|date:'c' }}">{{ dashboard.user_stats.last_updated|date:"n月j日 H:i" }}</time>
+        {% else %}
+        <span class="text-muted">–</span>
+        {% endif %}
+      </div>
+    </div>
 
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-label">連携済みユーザー</div>
-        <div class="stat-value">{{ dashboard.user_stats.total }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">アクティブ（サブスク）</div>
-        <div class="stat-value">{{ dashboard.user_stats.active }}</div>
-        <div class="stat-subtext">{{ dashboard.user_stats.active_ratio }}%</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">今月確認済み</div>
-        <div class="stat-value">{{ dashboard.user_stats.verified_this_month }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">要再リンク</div>
-        <div class="stat-value">{{ dashboard.user_stats.pending_relink }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">DM エラー</div>
-        <div class="stat-value">{{ dashboard.user_stats.dm_failures }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">最終更新</div>
-        <div class="stat-value">
-          {% if dashboard.user_stats.last_updated %}
-            {{ dashboard.user_stats.last_updated|date:"n月j日 H:i" }}
-          {% else %}
-            –
-          {% endif %}
+    <div class="kpi-grid">
+      <article class="kpi-card is-primary">
+        <header class="kpi-header">
+          <span class="kpi-label">連携済みユーザー</span>
+        </header>
+        <div class="kpi-body">
+          <span class="kpi-value">{{ dashboard.user_stats.total }}</span>
+          <div class="kpi-meta">
+            <span>アクティブ {{ dashboard.user_stats.active }}</span>
+            <span class="kpi-divider">/</span>
+            <span>{{ dashboard.user_stats.active_ratio }}%</span>
+          </div>
         </div>
-      </div>
+      </article>
+      <article class="kpi-card is-warning">
+        <header class="kpi-header">
+          <span class="kpi-label">要フォローアップ</span>
+        </header>
+        <div class="kpi-body">
+          <span class="kpi-value">{{ dashboard.user_stats.pending_relink }}</span>
+          <div class="kpi-meta">
+            <span class="kpi-chip is-warning">再リンク</span>
+            <span class="kpi-chip is-danger">DM {{ dashboard.user_stats.dm_failures }}</span>
+          </div>
+        </div>
+      </article>
+      <article class="kpi-card is-soft">
+        <header class="kpi-header">
+          <span class="kpi-label">今月確認済み</span>
+        </header>
+        <div class="kpi-body">
+          <span class="kpi-value">{{ dashboard.user_stats.verified_this_month }}</span>
+          <div class="kpi-meta">
+            <span>{{ dashboard.user_stats.verified_ratio }}%</span>
+            <span class="kpi-caption">確認済み率</span>
+          </div>
+        </div>
+      </article>
     </div>
 
-    <div class="tier-breakdown">
-      <h2 class="section-title">Tier 内訳</h2>
-      <ul class="tier-list">
-        {% for tier in dashboard.tier_breakdown %}
-        <li>
-          <span class="tier-label">{{ tier.label }}</span>
-          <span class="tier-count">{{ tier.count }}</span>
-        </li>
-        {% endfor %}
-      </ul>
+    <div class="insight-grid">
+      <section class="insight-card">
+        <header class="insight-header">
+          <h2>Tier 内訳</h2>
+          <span class="insight-caption">合計 {{ dashboard.user_stats.total }}</span>
+        </header>
+        <ul class="tier-breakdown-list">
+          {% for tier in dashboard.tier_breakdown %}
+          <li class="tier-row">
+            <div class="tier-row-top">
+              <span class="tier-label">{{ tier.label }}</span>
+              <span class="tier-count">{{ tier.count }}</span>
+            </div>
+            <div class="tier-progress" aria-hidden="true">
+              <span class="tier-progress-bar" style="width: {{ tier.percent }}%;"></span>
+            </div>
+            <div class="tier-progress-meta">
+              <span class="tier-progress-value">{{ tier.percent }}%</span>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+      <section class="insight-card">
+        <header class="insight-header">
+          <h2>運用メモ</h2>
+        </header>
+        <dl class="data-list">
+          <div>
+            <dt>要再リンク率</dt>
+            <dd>{{ dashboard.user_stats.pending_relink_ratio }}%</dd>
+          </div>
+          <div>
+            <dt>DM エラー率</dt>
+            <dd>{{ dashboard.user_stats.dm_failure_ratio }}%</dd>
+          </div>
+          <div>
+            <dt>今月送信済み</dt>
+            <dd>{{ dashboard.reminder_stats.reminders_sent_this_month }}</dd>
+          </div>
+          <div>
+            <dt>7日以上未解決</dt>
+            <dd>{{ dashboard.reminder_stats.pending_over_7_days }}</dd>
+          </div>
+        </dl>
+      </section>
     </div>
-  </div>
+  </section>
 
-  <div class="card">
-    <h2>リマインド状況</h2>
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-label">今月送信済み</div>
-        <div class="stat-value">{{ dashboard.reminder_stats.reminders_sent_this_month }}</div>
+  <section class="card status-card">
+    <header class="status-card-header">
+      <h2>リマインド状況</h2>
+      <div class="status-badges">
+        {% if dashboard.reminder_stats.reminders_sent_this_month %}
+        <span class="status-badge is-success">今月送信 {{ dashboard.reminder_stats.reminders_sent_this_month }}</span>
+        {% endif %}
+        {% if dashboard.reminder_stats.pending_over_7_days %}
+        <span class="status-badge is-warning">7日以上未解決 {{ dashboard.reminder_stats.pending_over_7_days }}</span>
+        {% endif %}
       </div>
-      <div class="stat-card">
-        <div class="stat-label">7日以上未解決</div>
-        <div class="stat-value">{{ dashboard.reminder_stats.pending_over_7_days }}</div>
-      </div>
-    </div>
+    </header>
+    {% if not dashboard.reminder_stats.reminders_sent_this_month and not dashboard.reminder_stats.pending_over_7_days %}
+    <p class="text-muted">リマインドの送信履歴はまだありません。</p>
+    {% endif %}
 
     {% if dashboard.unresolved_samples %}
     <div class="status-section">
-      <h3>未解決ユーザー（抜粋）</h3>
+      <h3>未解決ユーザー抜粋</h3>
       <ul class="status-list">
         {% for sample in dashboard.unresolved_samples %}
         <li>
@@ -87,7 +144,7 @@
             <span>最終通知: –</span>
             {% endif %}
             {% if sample.days_since_notice is not None %}
-            <span>（{{ sample.days_since_notice }} 日前）</span>
+            <span>{{ sample.days_since_notice }}日前</span>
             {% endif %}
             {% if sample.last_verified_at %}
             <span> / 最終確認: {{ sample.last_verified_at|date:"n月j日" }}</span>
@@ -101,7 +158,7 @@
 
     {% if dashboard.dm_failure_samples %}
     <div class="status-section">
-      <h3>DM エラー（最近5件）</h3>
+      <h3>DM エラー抜粋</h3>
       <ul class="status-list">
         {% for sample in dashboard.dm_failure_samples %}
         <li>
@@ -118,7 +175,7 @@
             <span>最終更新: –</span>
             {% endif %}
             {% if sample.reason %}
-            <span class="status-note">理由: {{ sample.reason }}</span>
+            <span class="status-note">{{ sample.reason }}</span>
             {% endif %}
           </div>
         </li>
@@ -126,11 +183,18 @@
       </ul>
     </div>
     {% endif %}
-  </div>
+  </section>
 
-  <div class="card">
-    <h2>EventSub 受信ログ</h2>
-    <div class="stat-grid">
+  <section class="card status-card">
+    <header class="status-card-header">
+      <h2>EventSub 受信ログ</h2>
+      <div class="status-badges">
+        <span class="status-badge is-muted">直近24時間 {{ dashboard.event_stats.events_last_24h }}</span>
+        <span class="status-badge is-muted">直近7日間 {{ dashboard.event_stats.events_last_7d }}</span>
+      </div>
+    </header>
+
+    <div class="stat-grid stat-grid--compact">
       <div class="stat-card">
         <div class="stat-label">保留中</div>
         <div class="stat-value">{{ dashboard.event_stats.pending }}</div>
@@ -140,20 +204,12 @@
         <div class="stat-value">{{ dashboard.event_stats.failed }}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">直近24時間</div>
-        <div class="stat-value">{{ dashboard.event_stats.events_last_24h }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">直近7日間</div>
-        <div class="stat-value">{{ dashboard.event_stats.events_last_7d }}</div>
-      </div>
-      <div class="stat-card">
         <div class="stat-label">最終受信</div>
         <div class="stat-value">
           {% if dashboard.event_stats.last_event_at %}
-            {{ dashboard.event_stats.last_event_at|date:"n月j日 H:i" }}
+          {{ dashboard.event_stats.last_event_at|date:"n月j日 H:i" }}
           {% else %}
-            –
+          –
           {% endif %}
         </div>
       </div>
@@ -216,20 +272,26 @@
       </ul>
     </div>
     {% endif %}
-  </div>
+  </section>
   {% else %}
-  <div class="card">
+  <section class="card">
     <h1>ダッシュボード</h1>
     <p class="text-muted">このアカウントにはダッシュボードへのアクセス権がありません。</p>
-  </div>
+    <p class="text-muted">権限の付与については管理者にお問い合わせください。</p>
+    <div class="actions">
+      <a class="button-link" href="{% url 'self_service' %}">リンク状況を確認</a>
+    </div>
+  </section>
   {% endif %}
 {% else %}
-  <div class="card">
+  <section class="card">
     <h1>NeiBot 管理パネルへようこそ</h1>
     <p class="text-muted">運用状況を確認したり、ロール DM を送信するには Twitch でログインしてください。</p>
     <div class="actions">
       <a class="button-primary" href="/accounts/twitch/login/">Twitchでログイン</a>
     </div>
-  </div>
+  </section>
 {% endif %}
 {% endblock %}
+
+
