@@ -497,6 +497,18 @@ def _find_discord_ids_by_twitch_id(twitch_user_id: str) -> list[str]:
     return res
 
 
+@app.get("/twitch_eventsub")
+async def twitch_eventsub_probe() -> PlainTextResponse:
+    """Health check endpoint for Twitch verification pings (GET)."""
+    return PlainTextResponse("ok", status_code=200)
+
+
+@app.head("/twitch_eventsub")
+async def twitch_eventsub_head() -> PlainTextResponse:
+    """Respond to HEAD requests with empty 200 to satisfy preflight checks."""
+    return PlainTextResponse("", status_code=200)
+
+
 @app.post("/twitch_eventsub")
 async def twitch_eventsub(
     request: Request,
