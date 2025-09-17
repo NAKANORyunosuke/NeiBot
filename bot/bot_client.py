@@ -517,19 +517,21 @@ async def twitch_eventsub(
     twitch_msg_ts: str = Header(None, alias="Twitch-Eventsub-Message-Timestamp"),
     twitch_signature: str = Header(None, alias="Twitch-Eventsub-Message-Signature"),
 ):
-    body = await request.body()
+    body_bytes = await request.body()
+    if body_bytes is None:
+        body_bytes = b""
     try:
-        data = await request.json()
+        data = json.loads(body_bytes.decode("utf-8") or "{}")
+        if not isinstance(data, dict):
+            data = {}
     except Exception:
-        return PlainTextResponse("invalid json", status_code=400)
+        data = {}
 
-    # webhook verification
     if twitch_msg_type == "webhook_callback_verification":
         challenge = data.get("challenge")
         debug_print("[EventSub] verification")
         return PlainTextResponse(challenge or "", status_code=200)
 
-    # notification / revocation must verify signature
     try:
         _, secret = get_eventsub_config()
     except Exception as e:
@@ -538,9 +540,7 @@ async def twitch_eventsub(
     if not (twitch_msg_id and twitch_msg_ts and twitch_signature):
         return PlainTextResponse("missing headers", status_code=400)
 
-    if not _verify_signature(
-        secret, twitch_msg_id, twitch_msg_ts, body, twitch_signature
-    ):
+    if not _verify_signature(secret, twitch_msg_id, twitch_msg_ts, body_bytes, twitch_signature):
         return PlainTextResponse("invalid signature", status_code=403)
 
     if twitch_msg_type == "notification":
@@ -548,15 +548,18 @@ async def twitch_eventsub(
         event = data.get("event") or {}
         debug_print(f"[EventSub] notify: {sub_type}")
 
-        # Persist to inbox (best-effort)
         try:
             inbox_enqueue_event(
                 source="twitch",
                 delivery_id=str(twitch_msg_id),
                 event_type=str(sub_type or ""),
                 twitch_user_id=str(
-                    event.get("user_id") or event.get("user") or event.get("user_login") or ""
-                ) or None,
+                    event.get("user_id")
+                    or event.get("user")
+                    or event.get("user_login")
+                    or ""
+                )
+                or None,
                 payload=data,
                 headers={
                     "Twitch-Eventsub-Message-Id": twitch_msg_id,
@@ -568,7 +571,6 @@ async def twitch_eventsub(
         except Exception as e:
             debug_print(f"[EventSub][inbox] enqueue failed: {e!r}")
 
-        # Apply immediately
         try:
             matched = apply_event_to_linked_users(sub_type, event, twitch_msg_ts)
             inbox_mark_processed("twitch", str(twitch_msg_id), ok=True)
@@ -583,7 +585,6 @@ async def twitch_eventsub(
         return JSONResponse({"status": "revoked"})
 
     return PlainTextResponse("ignored", status_code=200)
-
 
 # ===== FastAPI を別スレッドで起動 =====
 def start_api():
