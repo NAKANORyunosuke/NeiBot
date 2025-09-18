@@ -1,14 +1,15 @@
-﻿
-{% load static %}
-
-{% static 'favicon.ico' as favicon %}
-{% static 'apple-touch-icon.png' as apple_touch_icon %}
+﻿{% load static %} {% static 'favicon.ico' as favicon %} {% static 'favicon.ico'
+as apple_touch_icon %}
 <!DOCTYPE html>
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
     <title>{% block title %}NeiBot 管理パネル{% endblock %}</title>
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ apple_touch_icon }}" />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="{{ apple_touch_icon }}"
+    />
     <link rel="icon" type="image/png" sizes="32x32" href="{{ favicon }}" />
     <link rel="icon" type="image/png" sizes="16x16" href="{{ favicon }}" />
     <link rel="icon" type="image/x-icon" sizes="any" href="{{ favicon }}" />
@@ -21,8 +22,7 @@
       <header class="site-header">
         <div class="brand">NeiBot 管理パネル</div>
         <nav class="site-nav" aria-label="メインメニュー">
-          {% if user.is_authenticated %}
-          {% if user.is_staff %}
+          {% if user.is_authenticated %} {% if user.is_staff %}
           <a href="{% url 'index' %}">ダッシュボード</a>
           <a href="{% url 'import_subscribers' %}">サブスクCSV</a>
           {% endif %}
@@ -44,15 +44,10 @@
           <div class="flash-message">{{ message }}</div>
           {% endfor %}
         </div>
-        {% endif %}
-
-        {% block content %}{% endblock %}
+        {% endif %} {% block content %}{% endblock %}
       </main>
 
       <footer class="site-footer">&copy; {% now 'Y' %} NeiBot</footer>
     </div>
   </body>
 </html>
-
-
-
