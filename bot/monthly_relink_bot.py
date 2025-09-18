@@ -21,10 +21,7 @@ from discord.ext import commands
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from bot.utils.save_and_load import (
-    load_users,
-    patch_linked_user,
-)
+from bot.utils.save_and_load import load_users, patch_linked_user, load_role_ids
 from bot.common import debug_print
 
 # ========= 定数・パス =========
@@ -101,7 +98,9 @@ class ReLinkCog(commands.Cog):
             if not role_conf:
                 continue
             try:
-                member = guild.get_member(discord_int) or await guild.fetch_member(discord_int)
+                member = guild.get_member(discord_int) or await guild.fetch_member(
+                    discord_int
+                )
             except (discord.NotFound, discord.Forbidden):
                 continue
             except discord.HTTPException:
@@ -119,7 +118,9 @@ class ReLinkCog(commands.Cog):
             if not target_role_ids:
                 continue
 
-            roles_to_remove = [role for role in member.roles if role.id in target_role_ids]
+            roles_to_remove = [
+                role for role in member.roles if role.id in target_role_ids
+            ]
             if not roles_to_remove:
                 continue
 

@@ -42,9 +42,7 @@ from bot.utils.save_and_load import (
 from bot.utils.eventsub_apply import apply_event_to_linked_users
 import hmac
 import hashlib
-import datetime as dt
 import io
-import os
 
 # ==================== パス設定（絶対パス） ====================
 
@@ -540,7 +538,9 @@ async def twitch_eventsub(
     if not (twitch_msg_id and twitch_msg_ts and twitch_signature):
         return PlainTextResponse("missing headers", status_code=400)
 
-    if not _verify_signature(secret, twitch_msg_id, twitch_msg_ts, body_bytes, twitch_signature):
+    if not _verify_signature(
+        secret, twitch_msg_id, twitch_msg_ts, body_bytes, twitch_signature
+    ):
         return PlainTextResponse("invalid signature", status_code=403)
 
     if twitch_msg_type == "notification":
@@ -585,6 +585,7 @@ async def twitch_eventsub(
         return JSONResponse({"status": "revoked"})
 
     return PlainTextResponse("ignored", status_code=200)
+
 
 # ===== FastAPI を別スレッドで起動 =====
 def start_api():
