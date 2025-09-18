@@ -1,12 +1,14 @@
 ﻿
-{% load static %}
+{% load static %}
+
 {% static 'favicon.ico' as favicon %}
+{% static 'apple-touch-icon.png' as apple_touch_icon %}
 <!DOCTYPE html>
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
     <title>{% block title %}NeiBot 管理パネル{% endblock %}</title>
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ favicon }}" />
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ apple_touch_icon }}" />
     <link rel="icon" type="image/png" sizes="32x32" href="{{ favicon }}" />
     <link rel="icon" type="image/png" sizes="16x16" href="{{ favicon }}" />
     <link rel="icon" type="image/x-icon" sizes="any" href="{{ favicon }}" />
