@@ -16,8 +16,10 @@ zip_for_ChatGPT.bat
 webadmin/media/
 
 # Django collected static (if used)
-webadmin/static/
 !webadmin/static/*.ico
+!webadmin/static/*.png
+!webadmin/static/*.jpg
+!webadmin/static/*.jpeg
 # Logs / temp
 *.log
 *.tmp
