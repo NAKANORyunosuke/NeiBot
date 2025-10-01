@@ -1,0 +1,102 @@
+﻿{% extends "panel/base.html" %}
+{% block title %}未解決ユーザー一覧 | NeiBot 管理パネル{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h1>未解決ユーザー一覧</h1>
+  <p class="text-muted">ダッシュボードの抜粋に表示される未解決ユーザーをすべて確認できます。</p>
+
+  <dl class="data-list">
+    <div>
+      <dt>未解決ユーザー総数</dt>
+      <dd>{{ total_unresolved }}</dd>
+    </div>
+    <div>
+      <dt>7日以上未解決</dt>
+      <dd>{{ over_seven_days }}</dd>
+    </div>
+  </dl>
+
+  {% if unresolved_users %}
+  <div class="table-wrapper">
+    <table class="event-table">
+      <thead>
+        <tr>
+          <th>Discord ID</th>
+          <th>Twitch</th>
+          <th>最終通知</th>
+          <th>通知から</th>
+          <th>最終確認</th>
+          <th>DM状況</th>
+          <th>最終更新</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in unresolved_users %}
+        <tr>
+          <td><code>{{ user.discord_id }}</code></td>
+          <td>
+            {% if user.twitch_username %}
+            <div>{{ user.twitch_username }}</div>
+            {% else %}
+            <span class="text-muted">?</span>
+            {% endif %}
+            {% if user.twitch_user_id %}
+            <div class="text-muted small">ID: {{ user.twitch_user_id }}</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.last_notice_at %}
+            {{ user.last_notice_at|date:"n月j日 H:i" }}
+            {% else %}
+            <span class="text-muted">未通知</span>
+            {% endif %}
+            {% if user.first_notice_at and user.first_notice_at != user.last_notice_at %}
+            <div class="text-muted small">初回 {{ user.first_notice_at|date:"n月j日 H:i" }}</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.days_since_notice is not None %}
+            {{ user.days_since_notice }}日
+            {% else %}
+            <span class="text-muted">-</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.last_verified_at %}
+            {{ user.last_verified_at|date:"Y年n月j日" }}
+            {% else %}
+            <span class="text-muted">不明</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.dm_failed %}
+            <span class="status-badge is-danger">DM失敗</span>
+            {% if user.dm_failed_reason %}
+            <div class="text-muted small">{{ user.dm_failed_reason }}</div>
+            {% endif %}
+            {% else %}
+            <span class="status-badge is-muted">未失敗</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.updated_at %}
+            {{ user.updated_at|date:"n月j日 H:i" }}
+            {% else %}
+            <span class="text-muted">?</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">未解決ユーザーは現在存在しません。</p>
+  {% endif %}
+
+  <div class="actions">
+    <a class="button-link" href="{% url 'index' %}">ダッシュボードに戻る</a>
+  </div>
+</section>
+{% endblock %}

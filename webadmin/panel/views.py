@@ -425,6 +425,55 @@ def _build_self_service_entry(
     }
 
 
+def _collect_unresolved_users() -> List[Dict[str, Any]]:
+    today = timezone.localdate()
+    try:
+        linked_users = list(LinkedUser.objects.all())
+    except Exception:
+        linked_users = []
+
+    unresolved: List[Dict[str, Any]] = []
+    for linked in linked_users:
+        data = linked.data if isinstance(linked.data, dict) else {}
+        if not isinstance(data, dict):
+            data = {}
+        if data.get('resolved', True):
+            continue
+
+        last_notice_dt = _to_local(_parse_iso_datetime(data.get('last_notice_at')))
+        first_notice_dt = _to_local(_parse_iso_datetime(data.get('first_notice_at')))
+        days_since_notice = (
+            (today - last_notice_dt.date()).days if last_notice_dt else None
+        )
+        last_verified_at = _parse_iso_date(data.get('last_verified_at'))
+
+        entry = {
+            'discord_id': linked.discord_id,
+            'twitch_username': data.get('twitch_username') or '',
+            'twitch_user_id': data.get('twitch_user_id') or '',
+            'first_notice_at': first_notice_dt,
+            'last_notice_at': last_notice_dt,
+            'days_since_notice': days_since_notice,
+            'last_verified_at': last_verified_at,
+            'dm_failed': bool(data.get('dm_failed')),
+            'dm_failed_reason': data.get('dm_failed_reason') or '',
+            'linked_at': _to_local(_parse_iso_datetime(linked.created_at)),
+            'updated_at': _to_local(_parse_iso_datetime(linked.updated_at)),
+        }
+        unresolved.append(entry)
+
+    fallback_dt = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+
+    unresolved.sort(
+        key=lambda item: (
+            item.get('last_notice_at') or fallback_dt,
+            item.get('discord_id'),
+        )
+    )
+    return unresolved
+
+
+
 def _collect_self_service_entries(
     twitch_profile: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
@@ -476,6 +525,32 @@ def index(request: HttpRequest) -> HttpResponse:
         request,
         "panel/index.html",
         {"dashboard": dashboard, "can_view_dashboard": can_view_dashboard},
+    )
+
+
+
+
+@login_required
+def unresolved_users(request: HttpRequest) -> HttpResponse:
+    if not request.user.is_staff:
+        return HttpResponseForbidden('このページへのアクセス権限がありません。')
+
+    unresolved = _collect_unresolved_users()
+    over_seven_days = sum(
+        1
+        for item in unresolved
+        if item.get('days_since_notice') is not None
+        and item['days_since_notice'] >= 7
+    )
+
+    return render(
+        request,
+        'panel/unresolved_users.html',
+        {
+            'unresolved_users': unresolved,
+            'total_unresolved': len(unresolved),
+            'over_seven_days': over_seven_days,
+        },
     )
 
 
