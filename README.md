@@ -1,247 +1,147 @@
-# NeiBot – Twitch サブスク連携 Discord Bot
+﻿# NeiBot – Twitch サブスク連携 Discord Bot
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![py-cord](https://img.shields.io/badge/py--cord-2.6.1-green)
 
-Twitch サブスク状況に応じて Discord 側のロール・チャンネル権限を自動管理する Bot です。/link による OAuth 連携、月次の再リンク DM、Twitch EventSub(Webhook) による再サブ情報の自動反映に対応しています。
+NeiBot は Twitch のサブスクライバー状態を Discord サーバーへ反映し、専用ロールやチャンネル制御、月次リマインド DM を自動化する統合ボットです。Discord ボットと FastAPI Webhook を 1 プロセスで動かし、Django ベースの管理コンソールから運用を行います。
 
 ---
 
 ## 主な機能
-
-- Twitch 連携: `/link` で視聴者 OAuth。配信者トークンで補助情報を取得。
-- サブ情報の保存: `streak_months`(連続) / `cumulative_months`(累計) / `subscribed_since`(開始日) / `tier` を保存。
-- EventSub(Webhook): `channel.subscribe`/`channel.subscription.message`/`channel.subscription.end` を受信し、自動更新。
-- 月次リマインド: 月初に全員へ再リンク DM、7日経過で未解決へ再送。
-- ロール管理: 連携ロールと Tier ロールを付与/整理。サブ専用カテゴリー/チャンネルも自動整備。
+- `/link` による Twitch OAuth 連携と Tier ロール自動付与
+- Twitch EventSub (`channel.subscribe`, `channel.subscription.message`, `channel.subscription.end`, `channel.cheer`, `stream.online`) の受信と連動処理
+- APScheduler を用いた毎月の再リンクリマインド DM と未解決者のロール剥奪
+- 新規参加者への自動 DM 案内、`/unlink` による連携解除
+- 管理者向け Django パネルでのダッシュボード、ロール単位の DM 一斉送信、Twitch CSV 取り込み、EventSub 管理
+- `scripts/eventsub_local_test.py`・Jupyter Notebook によるローカル検証
 
 ---
 
-## 構成
+## アーキテクチャ概要
+- **Discord Bot** (`bot/bot_client.py`, `bot/cogs/`)
+  - py-cord 2.6.1 で実装。Intents は `Intents.all()` を使用。
+  - Slash Command 拡張 (`link`, `unlink`, `monthly_relink_bot`, `auto_link_dm`) と DM 送信／ロール制御を担当。
+- **FastAPI** (同 `bot/bot_client.py`)
+  - `/twitch_callback` で OAuth コールバックを受け、Helix API からサブスク情報を取得。
+  - `/twitch_eventsub` で EventSub 通知を HMAC 検証のうえ反映。管理 API は Bearer 認証。
+- **Django 管理コンソール** (`webadmin/`)
+  - `RUN_DJANGO=1` でボット起動時に子プロセスとして `webadmin/manage.py runserver 127.0.0.1:8001` を起動。
+  - `panel` アプリが `db.sqlite3` の `linked_users` / `webhook_events` を参照し、Web UI で運用操作を提供。
+- **ストレージ**
+  - `db.sqlite3`: ボットと Django が共有。`linked_users`, `webhook_events`, `cheer_events`。
+  - `venv/all_users.json`: レガシー互換の JSON ストア。SQLite と二重で同期。
+  - 補助設定: `venv/token.json`, `role_id.json`, `channel_id.json`, `category_id.json`, `subscription_config.json`。
 
-- Discord Bot: `bot/bot_client.py`（py-cord）
-  - ロードする拡張: `bot.cogs.link`, `bot.cogs.unlink`(任意), `bot.monthly_relink_bot`, `bot.cogs.auto_link_dm`
-- FastAPI: `GET /twitch_callback`, `POST /twitch_eventsub`
-  - 起動時に EventSub を App Access Token で登録
-- スケジューラ: APScheduler（JST）
-  - 月初 09:05 初回通知／毎日 09:10 未解決再送
+---
+
+## ディレクトリ
+```
+bot/                  Discord Bot と FastAPI の実装
+  cogs/               Slash Command / イベント拡張
+  utils/              Twitch API, データ永続化, EventSub 適用ロジック
+webadmin/             Django 管理サイト
+scripts/              EventSub ローカルテスト CLI
+notebooks/            Webhook 動作確認 Notebook
+nginx.conf            本番用リバースプロキシの参考設定 (Let’s Encrypt + nginx)
+```
 
 ---
 
 ## セットアップ
-
-1) 依存インストール
-
-```bash
-python -m venv venv
-venv\Scripts\activate
- pip install -r requirements.txt
-```
-
-2) `venv/token.json` を作成
-
-```json
-{
-  "discord_token": "<Discord Bot Token>",
-  "guild_id": 123456789012345678,
-
-  "twitch_client_id": "<Twitch Client ID>",
-  "twitch_secret_key": "<Twitch Client Secret>",
-  "twitch_redirect_uri": "https://your.domain/twitch_callback",
-
-  "twitch_access_token": "<Broadcaster User Access Token>",
-  "twitch_id": "<Broadcaster User ID>"
-}
-```
-
-必須スコープ
-- 視聴者 OAuth(リンク用): `user:read:subscriptions`
-- 配信者ユーザートークン(補助取得/任意): `channel:read:subscriptions`（Bits を使う場合は `bits:read`）
-
-3) 起動
-
-```bash
-python bot/bot_client.py
-```
-
-環境変数 `DEBUG=1` で詳細ログを出力します。
-
----
-
-## EventSub(Webhook) 設定
-
-- コールバック URL: `twitch_redirect_uri` のホストを使い、`/twitch_eventsub` に自動変換（例: `https://your.domain/twitch_eventsub`）
-- 署名 secret: `twitch_secret_key` を使用（環境変数で上書き可）
-- 要件: HTTPS/標準ポート(443) 必須。ローカル開発では ngrok 等で公開してください。
-
-起動時ログ
-- 202: 登録受理
-- 409: 既に登録済み（問題なし）
-- `webhook_callback_verification` に対して challenge を 200 で返答します。
-
-ngrok 例
-
-```bash
-ngrok http 8000
-# token.json の twitch_redirect_uri を https://<ngrok>.ngrok-free.app/twitch_callback に変更
-# Twitch 開発コンソールの Redirect URL にも同値を登録
-```
-
----
-
-## スラッシュコマンド
-
-- `/link`: Twitch 連携を開始。完了後、Twitch名/サブ状態/Tier/連続・累計・開始日を DM で通知。
-- `/force_relink`: 全員へ再リンク DM（テスト）
-- `/force_resend`: 「7日経過・未解決」へ再送（テスト）
-- `/relink_status`: 未解決ユーザー数の要約（テスト）
-
----
-
-## データ保存（`venv/all_users.json`）
-
-主なキー
-- `twitch_username`, `twitch_user_id`
-- `tier`("1000"|"2000"|"3000"|null), `is_subscriber`
-- `streak_months`, `cumulative_months`, `subscribed_since`
-- `linked_date`, `last_verified_at`
-- `first_notice_at`, `last_notice_at`, `resolved`
-
-備考
-- `streak_months` は毎月の検証日と EventSub をもとに更新。
-- `cumulative_months` は EventSub(subscription.message) を最優先。未着の場合は自前ロジックで増分。
-- `linked_date` は /link 完了時に上書き更新。
-
----
-
-## よくある質問 / トラブルシュート
-
-- EventSub 登録が 400: callback は HTTPS/443 のみ許可。ngrok の https を使用。
-- EventSub 登録が 400(認可エラー): 作成は App Access Token 必須（実装済み）。
-- Bits が 401/403: トークン/スコープ不足。以後は自動スキップ（ログ1回）。
-- Webhook が来ない: ngrok URL 変更時は `twitch_redirect_uri` と Twitch 側設定を更新。ユーザーは /link 済みかを確認（未リンクは無視）。
-
----
-
-## ローカルテスト（Python / Jupyter / Twitch CLI なしでも可）
-
-選べる2通りの実行環境を追加しました。
-
-- Jupyter Notebook: `notebooks/NeiBot_EventSub_LocalTests.ipynb`
-  - FastAPI をローカル起動し、署名付きの EventSub 通知を直接POSTして DB 反映を検証します。
-  - Discord Bot は不要で、`venv/token.json` の `twitch_secret_key` を署名に使用します。
-
-- Pythonスクリプト: `scripts/eventsub_local_test.py`
-  - 例: `python scripts/eventsub_local_test.py --start-server`
-  - `--discord-id` と `--twitch-user-id` は任意（既定値あり）。
-
-事前準備
-
 ```powershell
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Notebook の実行手順（例）
-
-1) VS Code などで `notebooks/NeiBot_EventSub_LocalTests.ipynb` を開く
-2) 上から順にセルを実行（Webhook 検証→subscribe→message→end）
-3) 最後のセルで `db.sqlite3` の受信履歴を確認
-
-CLI 実行手順（例）
-
-```powershell
-# FastAPI を自動起動しつつ、subscribe→message→end を順番に送信
-python scripts/eventsub_local_test.py --start-server
+### `venv/token.json` を作成
+```json
+{
+  "discord_token": "<Discord Bot Token>",
+  "guild_id": 123456789012345678,
+  "twitch_client_id": "<Twitch Client ID>",
+  "twitch_secret_key": "<Twitch Client Secret>",
+  "twitch_redirect_uri": "https://your.domain/twitch_callback",
+  "twitch_access_token": "<Broadcaster OAuth Token>",
+  "twitch_id": "<Broadcaster User ID>",
+  "admin_api_token": "<任意の管理トークン>"
+}
 ```
+- Viewer OAuth スコープ: `user:read:subscriptions`
+- Broadcaster トークン: `channel:read:subscriptions` (Bits 集計まで行う場合 `bits:read` も付与)
 
-Twitch CLI を使ったテスト（任意）
-
-```powershell
-# 転送先/secret を設定
-twitch event configure -F http://127.0.0.1:8000/twitch_eventsub -s "<twitch_secret_key>"
-
-# 購読検証
-twitch event verify-subscription channel.subscribe -b <broadcaster_id>
-
-# 通知送信（例）
-twitch event trigger channel.subscribe -b <broadcaster_id> -u <user_id> --tier 1000
-twitch event trigger channel.subscription.message -b <broadcaster_id> -u <user_id> --tier 2000 --cumulative-months 7 --streak-months 4
-twitch event trigger channel.subscription.end -b <broadcaster_id> -u <user_id>
-```
+### 任意設定ファイル
+- `subscription_config.json`: Tier ごとのロール／カテゴリ／チャンネル名、通知チャンネルをカスタマイズ。
+- `role_id.json` / `channel_id.json` / `category_id.json`: 初回起動時に自動生成されるギルド ID マップ。
 
 ---
 
-## 本番環境（Nginx）
-
-Windows Server + Nginx + win-acme での構成例です。既存の運用はこの形を想定しています。
-
-1) Python/依存パッケージ
-
+## 起動方法
 ```powershell
-winget install Python.Python.3.12
-python -m venv venv
+# PowerShell 例
 venv\Scripts\activate
- pip install -r requirements.txt
-```
-
-2) Nginx のセットアップ（Chocolatey 例）
-
-```powershell
-choco install nginx
-```
-
-3) HTTP→HTTPS リダイレクト（任意）
-
-```nginx
-server {
-    listen 80;
-    server_name your.domain.com;
-    return 301 https://$host$request_uri;
-}
-```
-
-4) HTTPS リバースプロキシ（FastAPI→127.0.0.1:8000）
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name your.domain.com;
-
-    # win-acme で取得した証明書パスに置き換えてください
-    ssl_certificate     "C:/ProgramData/win-acme/httpsacme-v02.api.letsencrypt.org/acme-v02.pem";
-    ssl_certificate_key "C:/ProgramData/win-acme/httpsacme-v02.api.letsencrypt.org/acme-v02-key.pem";
-
-    # すべて FastAPI(Uvicorn) にプロキシ
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 600s;
-    }
-}
-```
-
-5) 設定上の注意
-
-- `twitch_redirect_uri` は本番の HTTPS ドメインで `/twitch_callback` を指す必要があります（例: `https://your.domain.com/twitch_callback`）。
-- EventSub のコールバックは自動で `https://your.domain.com/twitch_eventsub` になります（内部実装で `twitch_redirect_uri` から生成）。
-- Twitch の開発者コンソールに「OAuth Redirect URLs」として `twitch_redirect_uri` を登録してください。
-- Uvicorn は 8000 番で動作（`python bot/bot_client.py`）。Nginx が 443/80 を受け、Uvicorn にプロキシします。
-
-6) 常時稼働（例: タスクスケジューラ）
-
-```powershell
-cd C:\path\to\NeiBot
-venv\Scripts\activate
+$env:DEBUG = "1"             # 詳細ログ (任意)
+$env:RUN_DJANGO = "1"        # 管理画面を同時起動 (任意)
 python bot/bot_client.py
 ```
+- 環境変数
+  - `DEBUG=1` : 詳細ログを標準出力へ
+  - `APP_ENV=prod` : FastAPI の `/docs` 等を無効化
+  - `TWITCH_EVENTSUB_CALLBACK`, `TWITCH_EVENTSUB_SECRET` : `token.json` を上書き
+  - `RUN_DJANGO=1` : Django 管理画面を別スレッドで起動
+  - `BOT_ADMIN_API_BASE` : Django から利用する API ベース URL (既定 `http://127.0.0.1:8000`)
+  - `ADMIN_API_TOKEN` : Django から送る Bearer トークン (`token.json` と揃える)
+
+---
+
+## 本番運用 (Let’s Encrypt + nginx)
+1. Windows Server に Python 3.12 をインストールし、仮想環境へ依存パッケージを導入。
+2. Let’s Encrypt (win-acme 等) でドメイン証明書を取得。
+3. `nginx.conf` を参考に設定。
+   - `listen 80` で HTTPS へリダイレクト。
+   - `listen 443 ssl` で `ssl_certificate`, `ssl_certificate_key`, `ssl_trusted_certificate` を Let’s Encrypt の pem へ変更。
+   - `/twitch_callback` と `/twitch_eventsub` は 127.0.0.1:8000 (Uvicorn/FastAPI) へプロキシ。
+   - `/`, `/panel/`, `/accounts/` は 127.0.0.1:8001 (Django) へプロキシ。
+   - `/static/`, `/media/` はローカルディレクトリを直接配信。
+   - Rate Limit や悪質リクエストのフィルタを有効化している点に留意。
+4. タスクスケジューラ等で `venv\Scripts\activate && python bot/bot_client.py` を常駐実行。
+
+---
+
+## 管理コンソール
+- URL: `https://<domain>/panel/`
+- 主要機能
+  - ダッシュボードで連携済み人数・DM 失敗・Tier 内訳を可視化
+  - 未解決ユーザー一覧の CSV エクスポート
+  - Twitch の `subscriber-list.csv` をインポートし、`linked_users` を一括更新
+  - ロール選択 + テンプレート ( `{user}` ) 付き DM 一斉送信。添付ファイルは最大 8MB / メッセージ 10 個
+  - EventSub 購読の確認／追加／削除
+- `settings.ADMIN_API_TOKEN` と `BOT_ADMIN_API_BASE` は `.env` などに設定し、FastAPI 側のトークンと一致させる。
+
+---
+
+## テスト / 検証
+- **EventSub ローカルテスト**: `python scripts/eventsub_local_test.py --start-server`
+  - `--discord-id`, `--twitch-user-id` でテスト対象を指定。
+  - HMAC 署名済みの `channel.subscribe` → `message` → `end` を送信。
+- **Jupyter Notebook**: `notebooks/NeiBot_EventSub_LocalTests.ipynb`
+  - 順番にセルを実行し、`db.sqlite3` の更新を確認。
+- **Twitch CLI (任意)**:
+  ```powershell
+  twitch event configure -F https://<domain>/twitch_eventsub -s "<secret>"
+  twitch event trigger channel.subscribe -b <broadcaster_id> -u <user_id> --tier 1000
+  ```
+
+---
+
+## トラブルシューティング
+- EventSub 登録が 400: HTTPS/443 で公開されているか、ngrok 等を利用している場合 URL を更新済みか確認。
+- EventSub 401/403: Broadcaster トークンのスコープ不足。`twitch_access_token` を再発行。
+- `/link` 完了後にロールが付かない: Bot のロール位置／権限を確認し、`Twitch-linked` ロールより上位に配置。
+- DM が届かない: ユーザーの DM 設定、もしくは `dm_failed` フラグを Django ダッシュボードで確認。
+- Bits 情報が常に 0: Broadcaster トークンに `bits:read` を付与して再設定。
 
 ---
 
 ## ライセンス
-
-このプロジェクトは **商用利用禁止ライセンス（Non-Commercial License）** の下で公開されています。詳細は [LICENSE](./LICENSE) を参照してください。
+本プロジェクトは **非営利利用限定ライセンス (Non-Commercial License)** です。詳細は [`LICENSE`](./LICENSE) を参照してください。
