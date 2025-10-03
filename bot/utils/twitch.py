@@ -262,6 +262,16 @@ async def register_eventsub_subscriptions(
                 "secret": secret,
             },
         },
+        {
+            "type": "channel.cheer",
+            "version": "1",
+            "condition": {"broadcaster_user_id": broadcaster_id},
+            "transport": {
+                "method": "webhook",
+                "callback": callback_url,
+                "secret": secret,
+            },
+        },
     ]
 
     close_client = False

@@ -147,6 +147,7 @@ class EventSubSubscriptionForm(forms.Form):
         ("channel.subscribe", "channel.subscribe (購読開始)"),
         ("channel.subscription.message", "channel.subscription.message (継続通知)"),
         ("channel.subscription.end", "channel.subscription.end (終了通知)"),
+        ("channel.cheer", "channel.cheer (ビッツ)"),
         ("stream.online", "stream.online"),
         ("stream.offline", "stream.offline"),
     ]

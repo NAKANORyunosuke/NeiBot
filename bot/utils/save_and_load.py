@@ -18,6 +18,7 @@ JST = dt.timezone(dt.timedelta(hours=9))
 # ---- SQLite tables ----
 LINKED_USERS_TABLE = "linked_users"
 INBOX_TABLE = "webhook_events"
+CHEER_TABLE = "cheer_events"
 
 
 def _db_connect() -> sqlite3.Connection:
@@ -56,6 +57,19 @@ def _db_init(conn: sqlite3.Connection) -> None:
             received_at  TEXT NOT NULL,
             processed_at TEXT,
             PRIMARY KEY (source, delivery_id)
+        );
+        """
+    )
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {CHEER_TABLE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            twitch_user_id TEXT,
+            bits INTEGER NOT NULL,
+            is_anonymous INTEGER NOT NULL,
+            message TEXT,
+            payload TEXT NOT NULL,
+            cheer_at TEXT NOT NULL
         );
         """
     )
@@ -203,6 +217,45 @@ def load_channel_ids() -> Dict[str, Any]:
 
 def save_channel_ids(data: Dict[str, Any]) -> None:
     save_file(data, CHANNEL_FILE)
+
+
+def record_cheer_event(
+    *,
+    twitch_user_id: str | None,
+    bits: int,
+    is_anonymous: bool,
+    message: str | None,
+    payload: dict,
+    cheer_at: str | None,
+) -> None:
+    if not isinstance(bits, int) or bits <= 0:
+        return
+    conn = _db_connect()
+    try:
+        _db_init(conn)
+        p_json = json.dumps(payload or {}, ensure_ascii=False, default=str)
+        ts = cheer_at or _now_iso()
+        with conn:
+            conn.execute(
+                f"""
+                INSERT INTO {CHEER_TABLE}
+                    (twitch_user_id, bits, is_anonymous, message, payload, cheer_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(twitch_user_id) if twitch_user_id is not None else None,
+                    int(bits),
+                    1 if is_anonymous else 0,
+                    message,
+                    p_json,
+                    ts,
+                ),
+            )
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _db_load_all_users() -> Dict[str, Any]:

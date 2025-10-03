@@ -5,6 +5,7 @@ from .save_and_load import (
     load_users,
     get_linked_user,
     patch_linked_user,
+    record_cheer_event,
 )
 
 JST = dt.timezone(dt.timedelta(hours=9))
@@ -40,6 +41,34 @@ def apply_event_to_linked_users(
         or event.get("user_login")
         or event.get("broadcaster_user_id")
     )
+
+    cheer_bits: int | None = None
+    cheer_timestamp: str | None = None
+    is_cheer = sub_type == "channel.cheer"
+    if is_cheer:
+        bits_val = event.get("bits")
+        try:
+            cheer_bits = int(bits_val)
+        except (TypeError, ValueError):
+            cheer_bits = None
+        cheer_timestamp = (
+            event.get("event_timestamp")
+            or event.get("created_at")
+            or twitch_msg_ts
+            or dt.datetime.now(dt.timezone.utc).isoformat()
+        )
+        try:
+            record_cheer_event(
+                twitch_user_id=str(t_user_id) if t_user_id else None,
+                bits=cheer_bits or 0,
+                is_anonymous=bool(event.get("is_anonymous")),
+                message=event.get("message"),
+                payload=event,
+                cheer_at=cheer_timestamp,
+            )
+        except Exception:
+            pass
+
     if not t_user_id:
         return 0
 
@@ -85,9 +114,29 @@ def apply_event_to_linked_users(
             updates["is_subscriber"] = False
             updates["last_verified_at"] = now
 
+        elif is_cheer:
+            if cheer_bits and cheer_bits > 0 and not bool(event.get("is_anonymous")):
+                try:
+                    current = get_linked_user(did)
+                except Exception:
+                    current = {}
+                total_prev = current.get("total_cheer_bits") if isinstance(current, dict) else 0
+                try:
+                    total_prev = int(total_prev or 0)
+                except (TypeError, ValueError):
+                    total_prev = 0
+                updates["total_cheer_bits"] = total_prev + cheer_bits
+                updates["last_cheer_bits"] = cheer_bits
+                if cheer_timestamp:
+                    updates["last_cheer_at"] = cheer_timestamp
+                msg = event.get("message")
+                if msg:
+                    updates["last_cheer_message"] = str(msg)
+            # 匿名cheerの場合でも最終確認日時は更新しておく
+            updates.setdefault("last_verified_at", now)
+
         if updates:
             patch_linked_user(did, updates)
             matched += 1
 
     return matched
-
