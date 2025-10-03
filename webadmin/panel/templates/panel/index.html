@@ -132,7 +132,21 @@
         {% for sample in dashboard.unresolved_samples %}
         <li>
           <div class="status-header">
-            <span class="status-title">Discord ID: <code>{{ sample.discord_id }}</code></span>
+            {% with primary=sample.display_name|default:sample.full_tag %}
+              {% if primary %}
+                {% if sample.profile_url %}
+                <span class="status-title"><a href="{{ sample.profile_url }}" target="_blank" rel="noopener">{{ primary }}</a></span>
+                {% else %}
+                <span class="status-title">{{ primary }}</span>
+                {% endif %}
+              {% else %}
+                <span class="status-title">Discord ID: <code>{{ sample.discord_id }}</code></span>
+              {% endif %}
+            {% endwith %}
+            {% if sample.full_tag and sample.display_name and sample.display_name != sample.full_tag %}
+            <span class="status-meta text-muted">{{ sample.full_tag }}</span>
+            {% endif %}
+            <span class="status-meta text-muted">ID: <code>{{ sample.discord_id }}</code></span>
             {% if sample.twitch_username %}
             <span class="status-meta">Twitch: {{ sample.twitch_username }}</span>
             {% endif %}
@@ -163,7 +177,21 @@
         {% for sample in dashboard.dm_failure_samples %}
         <li>
           <div class="status-header">
-            <span class="status-title">Discord ID: <code>{{ sample.discord_id }}</code></span>
+            {% with primary=sample.display_name|default:sample.full_tag %}
+              {% if primary %}
+                {% if sample.profile_url %}
+                <span class="status-title"><a href="{{ sample.profile_url }}" target="_blank" rel="noopener">{{ primary }}</a></span>
+                {% else %}
+                <span class="status-title">{{ primary }}</span>
+                {% endif %}
+              {% else %}
+                <span class="status-title">Discord ID: <code>{{ sample.discord_id }}</code></span>
+              {% endif %}
+            {% endwith %}
+            {% if sample.full_tag and sample.display_name and sample.display_name != sample.full_tag %}
+            <span class="status-meta text-muted">{{ sample.full_tag }}</span>
+            {% endif %}
+            <span class="status-meta text-muted">ID: <code>{{ sample.discord_id }}</code></span>
             {% if sample.twitch_username %}
             <span class="status-meta">Twitch: {{ sample.twitch_username }}</span>
             {% endif %}

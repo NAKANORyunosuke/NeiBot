@@ -157,16 +157,53 @@ def _build_dashboard_context() -> Dict[str, Any]:
         if last_notice_dt and last_notice_dt.date() >= first_of_month:
             reminder_stats["reminders_sent_this_month"] += 1
 
+        discord_profile = data.get('discord_profile')
+        if not isinstance(discord_profile, dict):
+            discord_profile = {}
+        discord_username = str(
+            data.get('discord_username')
+            or data.get('discord_name')
+            or discord_profile.get('username')
+            or ''
+        ).strip()
+        discord_display_name = str(
+            data.get('discord_display_name')
+            or data.get('discord_global_name')
+            or discord_profile.get('display_name')
+            or discord_profile.get('global_name')
+            or ''
+        ).strip()
+        discord_discriminator = str(
+            data.get('discord_discriminator')
+            or discord_profile.get('discriminator')
+            or ''
+        ).strip()
+        if not discord_display_name and discord_username:
+            discord_display_name = discord_username
+        discord_full_tag = ''
+        if discord_username:
+            if discord_discriminator and discord_discriminator not in {'', '0', '0000'}:
+                discord_full_tag = f"{discord_username}#{discord_discriminator}"
+            else:
+                discord_full_tag = discord_username
+        elif discord_display_name:
+            discord_full_tag = discord_display_name
+
         days_since_notice = None
         if last_notice_dt:
             days_since_notice = (today - last_notice_dt.date()).days
         if not resolved and days_since_notice is not None and days_since_notice >= 7:
             reminder_stats["pending_over_7_days"] += 1
 
+        profile_url = f"https://discord.com/users/{linked.discord_id}"
+
         if not resolved:
             unresolved_samples.append(
                 {
                     "discord_id": linked.discord_id,
+                    "display_name": discord_display_name,
+                    "full_tag": discord_full_tag,
+                    "profile_url": profile_url,
                     "twitch_username": data.get("twitch_username") or "",
                     "last_notice_at": last_notice_dt,
                     "days_since_notice": days_since_notice,
@@ -178,6 +215,9 @@ def _build_dashboard_context() -> Dict[str, Any]:
             dm_failure_samples.append(
                 {
                     "discord_id": linked.discord_id,
+                    "display_name": discord_display_name,
+                    "full_tag": discord_full_tag,
+                    "profile_url": profile_url,
                     "twitch_username": data.get("twitch_username") or "",
                     "reason": data.get("dm_failed_reason") or "",
                     "last_notice_at": last_notice_dt,
