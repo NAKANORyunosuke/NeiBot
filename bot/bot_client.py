@@ -32,6 +32,9 @@ from bot.utils.save_and_load import (
 from bot.utils.twitch import (
     get_user_info_and_subscription,
     register_eventsub_subscriptions,
+    list_eventsub_subscriptions,
+    delete_eventsub_subscription,
+    create_eventsub_subscription,
 )
 from bot.utils.save_and_load import (
     load_users,
@@ -550,6 +553,80 @@ async def send_role_dm(
         "role_id": role_id,
         "role_name": getattr(resolved_role, "name", None),
     }
+
+
+@app.get("/eventsub/subscriptions")
+async def eventsub_list(
+    authorization: str | None = Header(None, alias="Authorization"),
+    status: str | None = None,
+):
+    if not _require_admin_token(authorization):
+        return PlainTextResponse("forbidden", status_code=403)
+    try:
+        subs = await list_eventsub_subscriptions(status=status)
+        callback_url, _ = get_eventsub_config()
+        return {"subscriptions": subs, "default_callback": callback_url}
+    except Exception as exc:
+        debug_print(f"[EventSub][list] failed: {exc!r}")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.post("/eventsub/subscriptions")
+async def eventsub_create(
+    request: Request,
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    if not _require_admin_token(authorization):
+        return PlainTextResponse("forbidden", status_code=403)
+    payload = await request.json()
+    sub_type = str(payload.get("type") or "").strip()
+    if not sub_type:
+        return JSONResponse({"error": "missing_type"}, status_code=400)
+    version = str(payload.get("version") or "1").strip() or "1"
+    condition = payload.get("condition")
+    callback = payload.get("callback")
+    secret = payload.get("secret")
+    try:
+        twitch_status, response_payload = await create_eventsub_subscription(
+            sub_type,
+            version=version,
+            condition=condition if isinstance(condition, dict) else None,
+            callback_url=callback,
+            secret=secret,
+        )
+    except Exception as exc:
+        debug_print(f"[EventSub][create] failed: {exc!r}")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    ok = 200 <= twitch_status < 300
+    body = {
+        "status": "ok" if ok else "error",
+        "twitch_status": twitch_status,
+        "response": response_payload,
+    }
+    return JSONResponse(body, status_code=200 if ok else 400)
+
+
+@app.delete("/eventsub/subscriptions/{subscription_id}")
+async def eventsub_delete(
+    subscription_id: str,
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    if not _require_admin_token(authorization):
+        return PlainTextResponse("forbidden", status_code=403)
+    try:
+        twitch_status = await delete_eventsub_subscription(subscription_id)
+    except Exception as exc:
+        debug_print(f"[EventSub][delete] failed: {exc!r}")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    ok = 200 <= twitch_status < 300
+    body = {
+        "status": "ok" if ok else "error",
+        "twitch_status": twitch_status,
+    }
+    # Twitch DELETE success = 204
+    return JSONResponse(body, status_code=200 if ok else 400)
 
 
 # ---- API: Twitch OAuth コールバック ----

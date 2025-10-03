@@ -19,7 +19,11 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 
-from .forms import RoleBroadcastForm, SubscriberImportForm
+from .forms import (
+    RoleBroadcastForm,
+    SubscriberImportForm,
+    EventSubSubscriptionForm,
+)
 from .models import LinkedUser, WebhookEvent
 
 TIER_LABELS: List[Tuple[str, str]] = [
@@ -969,6 +973,136 @@ def broadcast(request: HttpRequest) -> HttpResponse:
             "max_attachment_bytes": RoleBroadcastForm.MAX_ATTACHMENT_BYTES,
         },
     )
+
+
+@login_required
+def eventsub_admin(request: HttpRequest) -> HttpResponse:
+    if not request.user.is_staff:
+        return HttpResponseForbidden("このページへアクセスする権限がありません。")
+
+    headers = (
+        {"Authorization": f"Bearer {settings.ADMIN_API_TOKEN}"}
+        if settings.ADMIN_API_TOKEN
+        else {}
+    )
+
+    subscriptions: List[Dict[str, Any]] = []
+    default_callback: Optional[str] = None
+
+    def fetch_subscriptions() -> None:
+        nonlocal subscriptions, default_callback
+        try:
+            resp = requests.get(
+                f"{settings.BOT_ADMIN_API_BASE}/eventsub/subscriptions",
+                headers=headers,
+                timeout=10,
+            )
+        except requests.RequestException as exc:
+            messages.error(request, f"購読一覧の取得に失敗しました: {exc}")
+            return
+        if resp.status_code != 200:
+            try:
+                payload = resp.json()
+            except Exception:
+                payload = resp.text
+            messages.error(
+                request,
+                f"購読一覧の取得に失敗しました (status={resp.status_code}): {payload}",
+            )
+            return
+        data = resp.json() or {}
+        subscriptions = data.get("subscriptions", []) or []
+        default_callback = data.get("default_callback")
+
+    fetch_subscriptions()
+
+    form_initial: Dict[str, Any] = {}
+    if default_callback:
+        form_initial["callback_url"] = default_callback
+
+    form: EventSubSubscriptionForm = EventSubSubscriptionForm(initial=form_initial)
+
+    if request.method == "POST":
+        action = request.POST.get("action") or "create"
+        if action == "delete":
+            sub_id = request.POST.get("subscription_id") or ""
+            if not sub_id:
+                messages.error(request, "削除対象の Subscription ID が指定されていません。")
+            else:
+                try:
+                    resp = requests.delete(
+                        f"{settings.BOT_ADMIN_API_BASE}/eventsub/subscriptions/{sub_id}",
+                        headers=headers,
+                        timeout=10,
+                    )
+                except requests.RequestException as exc:
+                    messages.error(request, f"削除に失敗しました: {exc}")
+                else:
+                    try:
+                        payload = resp.json()
+                    except Exception:
+                        payload = {"response": resp.text}
+                    if resp.status_code == 200 and payload.get("status") == "ok":
+                        messages.success(
+                            request, f"Subscription {sub_id} を削除しました。"
+                        )
+                        return redirect("eventsub_admin")
+                    else:
+                        messages.error(
+                            request,
+                            f"削除に失敗しました (status={resp.status_code}): {payload}",
+                        )
+        else:
+            form = EventSubSubscriptionForm(request.POST)
+            if form.is_valid():
+                payload = {
+                    "type": form.cleaned_data["subscription_type"],
+                    "version": form.cleaned_data["version"],
+                }
+                condition = form.cleaned_data.get("condition_json")
+                if condition:
+                    payload["condition"] = condition
+                callback_url = form.cleaned_data.get("callback_url")
+                if callback_url:
+                    payload["callback"] = callback_url
+                secret = form.cleaned_data.get("secret")
+                if secret:
+                    payload["secret"] = secret
+
+                try:
+                    resp = requests.post(
+                        f"{settings.BOT_ADMIN_API_BASE}/eventsub/subscriptions",
+                        json=payload,
+                        headers=headers,
+                        timeout=10,
+                    )
+                except requests.RequestException as exc:
+                    messages.error(request, f"購読の追加に失敗しました: {exc}")
+                else:
+                    try:
+                        resp_payload = resp.json()
+                    except Exception:
+                        resp_payload = {"response": resp.text}
+                    if resp.status_code == 200 and resp_payload.get("status") == "ok":
+                        messages.success(
+                            request,
+                            f"{payload['type']} の購読を作成しました。Twitch status={resp_payload.get('twitch_status')}",
+                        )
+                        return redirect("eventsub_admin")
+                    else:
+                        messages.error(
+                            request,
+                            f"購読の追加に失敗しました (status={resp.status_code}): {resp_payload}",
+                        )
+            else:
+                messages.error(request, "入力内容を確認してください。")
+
+    context = {
+        "form": form,
+        "subscriptions": subscriptions,
+        "default_callback": default_callback,
+    }
+    return render(request, "panel/eventsub.html", context)
 
 
 

@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
 import requests
 import re
+import json
 
 
 class MultiFileInput(forms.ClearableFileInput):
@@ -139,6 +140,59 @@ class RoleBroadcastForm(forms.Form):
             if v not in unique:
                 unique.append(v)
         return unique
+
+
+class EventSubSubscriptionForm(forms.Form):
+    EVENTSUB_CHOICES = [
+        ("channel.subscribe", "channel.subscribe (購読開始)"),
+        ("channel.subscription.message", "channel.subscription.message (継続通知)"),
+        ("channel.subscription.end", "channel.subscription.end (終了通知)"),
+        ("stream.online", "stream.online"),
+        ("stream.offline", "stream.offline"),
+    ]
+
+    subscription_type = forms.ChoiceField(
+        label="EventSubタイプ", choices=EVENTSUB_CHOICES
+    )
+    version = forms.CharField(
+        label="バージョン",
+        initial="1",
+        required=False,
+        help_text="通常は1のままで問題ありません。",
+    )
+    callback_url = forms.URLField(
+        label="Callback URL",
+        required=False,
+        help_text="空欄の場合はデフォルト設定を利用します。",
+    )
+    secret = forms.CharField(
+        label="Secret",
+        required=False,
+        widget=forms.TextInput(attrs={"autocomplete": "off"}),
+        help_text="空欄の場合は既定のシークレットを使用します。",
+    )
+    condition_json = forms.CharField(
+        label="条件 (JSON)",
+        required=False,
+        widget=forms.Textarea,
+        help_text="必要に応じてカスタム条件をJSON形式で指定できます。未入力の場合は配信者IDを条件に利用します。",
+    )
+
+    def clean_version(self) -> str:
+        value = (self.cleaned_data.get("version") or "1").strip()
+        return value or "1"
+
+    def clean_condition_json(self):
+        raw = self.cleaned_data.get("condition_json")
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise forms.ValidationError(f"JSONとして解釈できません: {exc}")
+        if not isinstance(parsed, dict):
+            raise forms.ValidationError("オブジェクト形式のJSONを指定してください。")
+        return parsed
 
 class SubscriberImportForm(forms.Form):
     file = forms.FileField(

@@ -295,6 +295,14 @@ input[type="submit"]:focus-visible,
   justify-content: center;
 }
 
+.inline-form {
+  display: inline;
+}
+
+.inline-form button {
+  margin: 0;
+}
+
 .button-ghost:hover,
 .button-ghost:focus-visible {
   background: rgba(255, 255, 255, 0.12);

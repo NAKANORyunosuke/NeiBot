@@ -26,6 +26,7 @@
           <a href="{% url 'self_service' %}">リンク状況確認</a>
           {% if user.is_staff %}
           <a href="{% url 'broadcast' %}">ロールDM送信</a>
+          <a href="{% url 'eventsub_admin' %}">EventSub管理</a>
           {% endif %}
           <a href="/accounts/logout/">ログアウト</a>
           {% else %}

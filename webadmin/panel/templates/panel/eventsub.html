@@ -1,0 +1,151 @@
+{% extends "panel/base.html" %}
+{% block title %}EventSub管理 | NeiBot 管理パネル{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1>EventSub 購読管理</h1>
+  <p class="text-muted">
+    本番環境に登録されている EventSub 購読の状況を確認し、必要に応じて追加・削除できます。
+    Twitch 側で登録された購読と一致しているか、定期的に確認してください。
+  </p>
+
+  <section class="form-section">
+    <h2>購読を追加</h2>
+    <p class="text-muted">
+      {% if default_callback %}
+      既定のコールバック URL: <code>{{ default_callback }}</code>
+      {% else %}
+      既定のコールバック URL は token.json の値から自動的に設定されます。
+      {% endif %}
+    </p>
+
+    <form method="post" class="form-grid" novalidate>
+      {% csrf_token %}
+      <div class="form-field">
+        <label for="id_subscription_type">{{ form.subscription_type.label }}</label>
+        {{ form.subscription_type }}
+        {% if form.subscription_type.errors %}
+        <ul class="error-list">
+          {% for error in form.subscription_type.errors %}
+          <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+
+      <div class="form-field">
+        <label for="id_version">{{ form.version.label }}</label>
+        {{ form.version }}
+        <div class="helper-text">{{ form.version.help_text }}</div>
+        {% if form.version.errors %}
+        <ul class="error-list">
+          {% for error in form.version.errors %}
+          <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+
+      <div class="form-field">
+        <label for="id_callback_url">{{ form.callback_url.label }}</label>
+        {{ form.callback_url }}
+        <div class="helper-text">{{ form.callback_url.help_text }}</div>
+        {% if form.callback_url.errors %}
+        <ul class="error-list">
+          {% for error in form.callback_url.errors %}
+          <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+
+      <div class="form-field">
+        <label for="id_secret">{{ form.secret.label }}</label>
+        {{ form.secret }}
+        <div class="helper-text">{{ form.secret.help_text }}</div>
+        {% if form.secret.errors %}
+        <ul class="error-list">
+          {% for error in form.secret.errors %}
+          <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+
+      <div class="form-field">
+        <label for="id_condition_json">{{ form.condition_json.label }}</label>
+        {{ form.condition_json }}
+        <div class="helper-text">{{ form.condition_json.help_text }}</div>
+        {% if form.condition_json.errors %}
+        <ul class="error-list">
+          {% for error in form.condition_json.errors %}
+          <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+
+      <div class="actions">
+        <button type="submit">購読を追加</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="table-section">
+    <h2>購読一覧</h2>
+    {% if subscriptions %}
+    <div class="table-wrapper">
+      <table class="event-table">
+        <thead>
+          <tr>
+            <th>タイプ</th>
+            <th>ステータス</th>
+            <th>Subscription ID</th>
+            <th>作成日時</th>
+            <th>接続先</th>
+            <th>コスト</th>
+            <th>条件</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sub in subscriptions %}
+          <tr>
+            <td>{{ sub.type }}</td>
+            <td>{{ sub.status }}</td>
+            <td><code>{{ sub.id }}</code></td>
+            <td>{% if sub.created_at %}{{ sub.created_at }}{% else %}–{% endif %}</td>
+            <td>
+              {% if sub.transport and sub.transport.callback %}
+              <span class="text-muted">{{ sub.transport.callback }}</span>
+              {% else %}
+              –
+              {% endif %}
+            </td>
+            <td>{{ sub.cost|default:0 }}</td>
+            <td>
+              {% if sub.condition %}
+              <code>{{ sub.condition }}</code>
+              {% else %}
+              –
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" class="inline-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete" />
+                <input type="hidden" name="subscription_id" value="{{ sub.id }}" />
+                <button type="submit" class="button-link button-ghost">削除</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted">登録済みの EventSub 購読はありません。</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
