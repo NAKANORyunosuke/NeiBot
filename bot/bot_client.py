@@ -3,6 +3,8 @@ import json
 import threading
 from typing import Coroutine, Any
 import zoneinfo
+import datetime as dt
+import copy
 import discord
 from discord.ext import commands
 from fastapi import FastAPI, Request, Header
@@ -28,6 +30,8 @@ from bot.utils.save_and_load import (
     load_channel_ids,
     load_subscription_categories,
     save_subscription_categories,
+    load_subscription_config,
+    save_subscription_config,
 )
 from bot.utils.twitch import (
     get_user_info_and_subscription,
@@ -53,31 +57,144 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "./"))
 TOKEN_PATH = os.path.join(PROJECT_ROOT, "venv", "token.json")
 USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "all_users.json")
 
-ROLE_NAMES_LIST = [
-    "Subscription Tier1",
-    "Subscription Tier2",
-    "Subscription Tier3",
-    "Twitch-linked",
-]
-CHANNEL_NAMES_LIST = [
-    "tier-1",
-    "tier-2",
-    "tier-3",
-]
-CATEGORY_NAMES = [
-    "サブスクTier 1",
-    "サブスクTier 2",
-    "サブスクTier 3",
-]
-CATEGORY_ROLE_MAP = {
-    CATEGORY_NAMES[j]: ROLE_NAMES_LIST[j] for j in range(len(CATEGORY_NAMES))
+DEFAULT_SUBSCRIPTION_CONFIG: dict[str, Any] = {
+    "tiers": [
+        {
+            "key": "tier1",
+            "role_name": "Subscription Tier1",
+            "category_name": "サブスクTier 1",
+            "channel_name": "tier-1",
+            "view_roles": ["tier1"],
+        },
+        {
+            "key": "tier2",
+            "role_name": "Subscription Tier2",
+            "category_name": "サブスクTier 2",
+            "channel_name": "tier-2",
+            "view_roles": ["tier1", "tier2"],
+        },
+        {
+            "key": "tier3",
+            "role_name": "Subscription Tier3",
+            "category_name": "サブスクTier 3",
+            "channel_name": "tier-3",
+            "view_roles": ["tier1", "tier2", "tier3"],
+        },
+    ],
+    "linked_role_name": "Twitch-linked",
+    "notify_role_name": "Subscription Tier1",
+    "notify_channel_id": None,
 }
-CHANNEL_ROLE_MAP = {
-    CHANNEL_NAMES_LIST[j]: ROLE_NAMES_LIST[j] for j in range(len(CATEGORY_NAMES))
-}
-CATEGORY_CHANNEL_MAP = {
-    CATEGORY_NAMES[j]: CHANNEL_NAMES_LIST[j] for j in range(len(CATEGORY_NAMES))
-}
+
+
+def _load_subscription_definition() -> dict[str, Any]:
+    user_config = load_subscription_config()
+    if not user_config:
+        save_subscription_config(DEFAULT_SUBSCRIPTION_CONFIG)
+        user_config = {}
+
+    merged = copy.deepcopy(DEFAULT_SUBSCRIPTION_CONFIG)
+    if isinstance(user_config, dict):
+        for key, value in user_config.items():
+            if key == "tiers" or value is None:
+                continue
+            merged[key] = value
+
+    tiers: list[dict[str, Any]] = []
+    user_tiers = (
+        user_config.get("tiers") if isinstance(user_config, dict) else None
+    )
+    if isinstance(user_tiers, list) and user_tiers:
+        for idx, entry in enumerate(user_tiers):
+            if not isinstance(entry, dict):
+                continue
+            if idx < len(DEFAULT_SUBSCRIPTION_CONFIG["tiers"]):
+                base = copy.deepcopy(DEFAULT_SUBSCRIPTION_CONFIG["tiers"][idx])
+            else:
+                base = {
+                    "key": entry.get("key") or f"tier{idx + 1}",
+                    "role_name": entry.get("role_name")
+                    or entry.get("key")
+                    or f"Tier{idx + 1}",
+                    "category_name": entry.get("category_name")
+                    or entry.get("role_name")
+                    or f"Category{idx + 1}",
+                    "channel_name": entry.get("channel_name")
+                    or f"channel-{idx + 1}",
+                    "view_roles": entry.get("view_roles")
+                    or [entry.get("key") or f"tier{idx + 1}"],
+                }
+            for key, value in entry.items():
+                if value is not None:
+                    base[key] = value
+            if "key" not in base or not base["key"]:
+                base["key"] = f"tier{idx + 1}"
+            tiers.append(base)
+    if not tiers:
+        tiers = copy.deepcopy(DEFAULT_SUBSCRIPTION_CONFIG["tiers"])
+    merged["tiers"] = tiers
+    return merged
+
+
+SUBSCRIPTION_CONFIG = _load_subscription_definition()
+TIER_CONFIG = SUBSCRIPTION_CONFIG.get("tiers", [])
+
+ROLE_BY_KEY: dict[str, str] = {}
+TIER_ENTRIES: list[dict[str, Any]] = []
+ROLE_NAMES_LIST: list[str] = []
+CHANNEL_NAMES_LIST: list[str] = []
+CATEGORY_NAMES: list[str] = []
+CATEGORY_ROLE_MAP: dict[str, str] = {}
+CHANNEL_ROLE_MAP: dict[str, str] = {}
+CATEGORY_CHANNEL_MAP: dict[str, str] = {}
+CATEGORY_ALLOWED_ROLE_NAMES: dict[str, list[str]] = {}
+
+for entry in TIER_CONFIG:
+    key = str(entry.get("key") or f"tier{len(TIER_ENTRIES) + 1}")
+    role_name = str(entry.get("role_name") or key)
+    category_name = str(entry.get("category_name") or entry.get("channel_name") or role_name)
+    channel_name = str(entry.get("channel_name") or role_name)
+    allowed = entry.get("view_roles") or [key]
+
+    ROLE_BY_KEY[key] = role_name
+    if role_name not in ROLE_NAMES_LIST:
+        ROLE_NAMES_LIST.append(role_name)
+    if channel_name not in CHANNEL_NAMES_LIST:
+        CHANNEL_NAMES_LIST.append(channel_name)
+    if category_name not in CATEGORY_NAMES:
+        CATEGORY_NAMES.append(category_name)
+
+    CATEGORY_ROLE_MAP[category_name] = role_name
+    CHANNEL_ROLE_MAP[channel_name] = role_name
+    CATEGORY_CHANNEL_MAP[category_name] = channel_name
+
+    allowed_role_names: list[str] = []
+    for item in allowed:
+        resolved = ROLE_BY_KEY.get(str(item))
+        if not resolved and isinstance(item, str) and item in ROLE_BY_KEY.values():
+            resolved = item
+        if not resolved and item == key:
+            resolved = role_name
+        resolved = resolved or str(item)
+        if resolved not in allowed_role_names:
+            allowed_role_names.append(resolved)
+    if role_name not in allowed_role_names:
+        allowed_role_names.append(role_name)
+
+    CATEGORY_ALLOWED_ROLE_NAMES[category_name] = allowed_role_names
+    TIER_ENTRIES.append(
+        {
+            "key": key,
+            "role_name": role_name,
+            "category_name": category_name,
+            "channel_name": channel_name,
+            "view_role_names": allowed_role_names,
+        }
+    )
+
+LINKED_ROLE_NAME = SUBSCRIPTION_CONFIG.get("linked_role_name") or "Twitch-linked"
+if LINKED_ROLE_NAME and LINKED_ROLE_NAME not in ROLE_NAMES_LIST:
+    ROLE_NAMES_LIST.append(LINKED_ROLE_NAME)
 # ===== Discord Bot の準備 =====
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -94,6 +211,35 @@ app = FastAPI(
     redoc_url=None if IS_PROD else "/redoc",
     openapi_url=None if IS_PROD else "/openapi.json",
 )
+
+
+STREAM_NOTIFY_ROLE_NAME = SUBSCRIPTION_CONFIG.get("notify_role_name")
+if not STREAM_NOTIFY_ROLE_NAME:
+    notify_entry = next((e for e in TIER_ENTRIES if e.get("key") == "notify"), None)
+    if notify_entry:
+        STREAM_NOTIFY_ROLE_NAME = notify_entry.get("role_name")
+    elif TIER_ENTRIES:
+        STREAM_NOTIFY_ROLE_NAME = TIER_ENTRIES[0].get("role_name")
+    elif ROLE_NAMES_LIST:
+        STREAM_NOTIFY_ROLE_NAME = ROLE_NAMES_LIST[0]
+
+cfg_channel_id = SUBSCRIPTION_CONFIG.get("notify_channel_id")
+if not cfg_channel_id:
+    notify_entry = next((e for e in TIER_ENTRIES if e.get("key") == "notify"), None)
+    if notify_entry:
+        cfg_channel_id = notify_entry.get("channel_id")
+    else:
+        tier1_entry = next((e for e in TIER_ENTRIES if e.get("key") == "tier1"), None)
+        if tier1_entry:
+            cfg_channel_id = tier1_entry.get("channel_id")
+
+try:
+    STREAM_NOTIFY_CHANNEL_ID = int(cfg_channel_id) if cfg_channel_id else None
+except (TypeError, ValueError):
+    STREAM_NOTIFY_CHANNEL_ID = None
+
+if STREAM_NOTIFY_ROLE_NAME and STREAM_NOTIFY_ROLE_NAME not in ROLE_NAMES_LIST:
+    ROLE_NAMES_LIST.append(STREAM_NOTIFY_ROLE_NAME)
 
 
 # ---- Bot ループにコルーチンを投げる小ヘルパ ----
@@ -356,6 +502,77 @@ async def notify_role_members(
     debug_print(
         f"[/send_role_dm] done for role_id={role_id} guild_id={getattr(guild, 'id', None)}"
     )
+
+
+async def notify_stream_online(event: dict[str, Any]) -> None:
+    await bot.wait_until_ready()
+    broadcaster_login = (
+        event.get("broadcaster_user_login")
+        or event.get("user_login")
+        or event.get("broadcaster_user_name")
+        or event.get("user_name")
+    )
+    display_name = (
+        event.get("broadcaster_user_name")
+        or event.get("user_name")
+        or broadcaster_login
+        or "配信者"
+    )
+    if not broadcaster_login:
+        debug_print("[stream.online] broadcaster login missing; skip notify")
+    started_at_raw = event.get("started_at") or event.get("event_timestamp")
+    started_display = None
+    if started_at_raw:
+        try:
+            ts = started_at_raw.replace("Z", "+00:00")
+            dt_value = dt.datetime.fromisoformat(ts)
+            started_display = dt_value.astimezone(JST).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            started_display = None
+
+    twitch_url = f"https://www.twitch.tv/{broadcaster_login}" if broadcaster_login else None
+    channel_map = load_channel_ids()
+
+    for guild in bot.guilds:
+        channel_id_value = STREAM_NOTIFY_CHANNEL_ID
+        if channel_id_value is None:
+            mapping = channel_map.get(str(guild.id)) or channel_map.get(guild.id)
+            if isinstance(mapping, dict):
+                channel_id_value = mapping.get(STREAM_NOTIFY_ROLE_NAME)
+        if not channel_id_value:
+            continue
+        try:
+            channel_id_int = int(channel_id_value)
+        except (TypeError, ValueError):
+            continue
+
+        channel = guild.get_channel(channel_id_int)
+        if channel is None:
+            try:
+                channel = await guild.fetch_channel(channel_id_int)
+            except Exception as exc:
+                debug_print(
+                    f"[stream.online] channel {channel_id_int} missing in guild {guild.id}: {exc!r}"
+                )
+                continue
+
+        role = discord.utils.get(guild.roles, name=STREAM_NOTIFY_ROLE_NAME)
+        mention = role.mention if role else ""
+        lines = []
+        if mention:
+            lines.append(mention)
+        lines.append(f"{display_name} さんが配信を開始しました！")
+        if started_display:
+            lines.append(f"開始時刻 (JST): {started_display}")
+        if twitch_url:
+            lines.append(twitch_url)
+        message = "\n".join(lines)
+        try:
+            await channel.send(message)
+        except Exception as exc:
+            debug_print(
+                f"[stream.online] failed to send message to channel {channel_id_int}: {exc!r}"
+            )
 
 
 # ---- API: 直接Discordに通知する（外部/内部から叩ける）----
@@ -827,6 +1044,8 @@ async def twitch_eventsub(
 
         try:
             matched = apply_event_to_linked_users(sub_type, event, twitch_msg_ts)
+            if sub_type == "stream.online":
+                schedule_in_bot_loop(notify_stream_online(event))
             inbox_mark_processed("twitch", str(twitch_msg_id), ok=True)
             return JSONResponse({"status": "ok", "matched": matched})
         except Exception as e:
@@ -902,12 +1121,12 @@ async def make_subrole(bot):
     role_data = load_role_ids()
 
     for guild in guilds:
-        role_id_dic = role_data.get(guild.id, {})
+        role_id_dic = role_data.get(str(guild.id), {})
 
         for role_name in ROLE_NAMES_LIST:
             role = await ensure_role_exists(guild, role_name)
             role_id_dic[role.name] = role.id
-        role_data[guild.id] = role_id_dic
+        role_data[str(guild.id)] = role_id_dic
     save_role_ids(role_data)
 
 
@@ -958,51 +1177,63 @@ async def make_category_and_channel(bot):
     channel_data = load_channel_ids()
     for guild in guilds:
         everyone_role = guild.default_role
-        tier_role_dic = {
-            role_name: discord.utils.get(guild.roles, name=role_name)
-            for role_name in ROLE_NAMES_LIST
-        }
-        category_id_dic = category_data.get(guild.id, {})
-        channel_id_dic = channel_data.get(guild.id, {})
+        tier_role_dic: dict[str, discord.Role | None] = {}
+        for entry in TIER_ENTRIES:
+            role_obj = discord.utils.get(guild.roles, name=entry["role_name"])
+            tier_role_dic[entry["role_name"]] = role_obj
+        if LINKED_ROLE_NAME:
+            linked_role_obj = discord.utils.get(guild.roles, name=LINKED_ROLE_NAME)
+            tier_role_dic[LINKED_ROLE_NAME] = linked_role_obj
 
-        for category_name in CATEGORY_NAMES:
-            overwrites = {}
+        category_id_dic = category_data.get(str(guild.id), {})
+        channel_id_dic = channel_data.get(str(guild.id), {})
+
+        for entry in TIER_ENTRIES:
+            category_name = entry["category_name"]
+            channel_name = entry["channel_name"]
+            primary_role_name = entry["role_name"]
+            allowed_role_names = entry.get("view_role_names") or [primary_role_name]
+
+            overwrites: dict[Any, discord.PermissionOverwrite] = {}
             overwrites[everyone_role] = discord.PermissionOverwrite(view_channel=False)
-            for key, value in tier_role_dic.items():
-                subscriber_role = value
-                if re.search("3", key):
-                    # debug_print("DEBUG: ", key, category_name)
-                    overwrites[subscriber_role] = discord.PermissionOverwrite(
-                        view_channel=True
-                    )
 
-                if re.search("2", key) and re.search(r"[1,2]", category_name):
-                    # debug_print("DEBUG: ", key, category_name)
-                    overwrites[subscriber_role] = discord.PermissionOverwrite(
-                        view_channel=True
-                    )
+            for role_name in allowed_role_names:
+                if role_name in {"@everyone", "everyone", "*"}:
+                    role_obj = everyone_role
+                else:
+                    role_obj = tier_role_dic.get(role_name)
+                if role_obj is None:
+                    role_obj = discord.utils.get(guild.roles, name=role_name)
+                    if role_obj:
+                        tier_role_dic[role_name] = role_obj
+                if role_obj is None:
+                    continue
+                overwrites[role_obj] = discord.PermissionOverwrite(view_channel=True)
 
-                if re.search("1", key) and re.search(r"1", category_name):
-                    # debug_print("DEBUG: ", key, category_name)
-                    overwrites[subscriber_role] = discord.PermissionOverwrite(
-                        view_channel=True
-                    )
-            # debug_print("DEBUG: ", overwrites)
-            category = await ensure_category_exists(guild, category_name, overwrites)
-            category_id_dic[CATEGORY_ROLE_MAP[category.name]] = category.id
+    category = None
+    if category_name and category_name.lower() not in {"none", "", "null"}:
+        category = await ensure_category_exists(
+            guild,
+            category_name,
+            overwrites,
+        )
+        category_id_dic[primary_role_name] = category.id
 
-            channel = await ensure_text_channel_exists(
-                guild=guild,
-                channel_name=CATEGORY_CHANNEL_MAP[category.name],
-                overwrites=overwrites,
-                category=category,
-            )
-            channel_id_dic[CATEGORY_ROLE_MAP[category.name]] = channel.id
+    channel = await ensure_text_channel_exists(
+        guild=guild,
+        channel_name=channel_name,
+        overwrites=overwrites,
+        category=category,
+    )
+    channel_id_dic[primary_role_name] = channel.id
+    entry["channel_id"] = channel.id
 
-        category_data[str(guild.id)] = category_id_dic
-        channel_data[str(guild.id)] = channel_id_dic
+    category_data[str(guild.id)] = category_id_dic
+    channel_data[str(guild.id)] = channel_id_dic
+
     save_subscription_categories(category_data)
     save_channel_ids(channel_data)
+    save_subscription_config(SUBSCRIPTION_CONFIG)
 
 
 def start_django_admin():
@@ -1076,4 +1307,9 @@ if __name__ == "__main__":
     threading.Thread(target=start_api, daemon=True).start()
 
     # Discord Bot はメインスレッドで実行（bot.loop が基準になる）
-    asyncio.run(run_discord_bot())
+    try:
+        asyncio.run(run_discord_bot())
+    except KeyboardInterrupt:
+        debug_print("[shutdown] KeyboardInterrupt received")
+    except asyncio.CancelledError:
+        debug_print("[shutdown] asyncio tasks cancelled")

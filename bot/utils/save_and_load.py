@@ -12,6 +12,7 @@ TOKEN_FILE = os.path.join(DATA_DIR, "token.json")
 ROLE_FILE = os.path.join(DATA_DIR, "role_id.json")
 CHANNEL_FILE = os.path.join(DATA_DIR, "channel_id.json")
 CATEGORY_FILE = os.path.join(DATA_DIR, "category_id.json")
+ROLE_CONFIG_FILE = os.path.join(DATA_DIR, "subscription_config.json")
 DB_PATH = os.path.join(PROJECT_ROOT, "db.sqlite3")
 JST = dt.timezone(dt.timedelta(hours=9))
 
@@ -217,6 +218,18 @@ def load_channel_ids() -> Dict[str, Any]:
 
 def save_channel_ids(data: Dict[str, Any]) -> None:
     save_file(data, CHANNEL_FILE)
+
+
+def load_subscription_config() -> Dict[str, Any]:
+    try:
+        data = load_file(ROLE_CONFIG_FILE)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_subscription_config(data: Dict[str, Any]) -> None:
+    save_file(data or {}, ROLE_CONFIG_FILE)
 
 
 def record_cheer_event(

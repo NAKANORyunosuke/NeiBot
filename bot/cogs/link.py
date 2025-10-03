@@ -13,6 +13,7 @@ from bot.utils.save_and_load import (
     load_role_ids,
     load_users,
     patch_linked_user,
+    load_subscription_config,
 )
 
 
@@ -21,19 +22,42 @@ class LinkCog(commands.Cog):
         self.bot = bot
 
     @staticmethod
-    def _tier_role_map(role_conf: Dict[str, int]) -> Dict[str, Optional[int]]:
-        return {
-            "1000": role_conf.get("Subscription Tier1"),
-            "2000": role_conf.get("Subscription Tier2"),
-            "3000": role_conf.get("Subscription Tier3"),
-        }
+    def _role_name_map(role_conf: Dict[str, int]) -> Dict[str, Optional[int]]:
+        return {str(name): rid for name, rid in role_conf.items() if isinstance(rid, int)}
+
+    @staticmethod
+    def _subscription_tier_map() -> Dict[str, str]:
+        config = load_subscription_config()
+        tiers = config.get("tiers") if isinstance(config, dict) else None
+        result: Dict[str, str] = {}
+        if isinstance(tiers, list):
+            for entry in tiers:
+                if not isinstance(entry, dict):
+                    continue
+                key = str(entry.get("key") or "").strip()
+                role_name = str(entry.get("role_name") or "").strip()
+                if key and role_name:
+                    result[key] = role_name
+        return result
 
     @staticmethod
     def _all_tier_role_ids(role_conf: Dict[str, int]) -> set[int]:
+        config_map = LinkCog._subscription_tier_map()
+        managed_names = {
+            role_name
+            for key, role_name in config_map.items()
+            if key.lower().startswith("tier")
+        }
+        fallback = {
+            "Subscription Tier1",
+            "Subscription Tier2",
+            "Subscription Tier3",
+        }
+        target_names = managed_names or fallback
         return {
             rid
-            for key, rid in role_conf.items()
-            if key.startswith("Subscription Tier") and isinstance(rid, int)
+            for name, rid in role_conf.items()
+            if isinstance(rid, int) and name in target_names
         }
 
     async def _ensure_roles_for_member(
@@ -44,8 +68,30 @@ class LinkCog(commands.Cog):
     ) -> None:
         guild = member.guild
 
-        linked_role_id = role_conf.get("Twitch-linked")
-        tier_role_id = self._tier_role_map(role_conf).get(tier) if tier else None
+        role_name_map = self._role_name_map(role_conf)
+        subscription_map = self._subscription_tier_map()
+        linked_role_id = role_name_map.get("Twitch-linked") or role_name_map.get("twitch_linked")
+        tier_role_id = None
+        if tier:
+            tier_key_map = {
+                "1000": "Subscription Tier1",
+                "2000": "Subscription Tier2",
+                "3000": "Subscription Tier3",
+            }
+            tier_name = None
+            tier_key = None
+            tier_code_map = {
+                "1000": "tier1",
+                "2000": "tier2",
+                "3000": "tier3",
+            }
+            tier_key = tier_code_map.get(tier)
+            if tier_key:
+                tier_name = subscription_map.get(tier_key)
+            if not tier_name:
+                tier_name = tier_key_map.get(tier)
+            if tier_name:
+                tier_role_id = role_name_map.get(tier_name)
         all_tier_ids = self._all_tier_role_ids(role_conf)
 
         linked_role = guild.get_role(linked_role_id) if linked_role_id else None
