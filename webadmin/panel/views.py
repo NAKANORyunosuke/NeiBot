@@ -452,8 +452,45 @@ def _collect_unresolved_users() -> List[Dict[str, Any]]:
         )
         last_verified_at = _parse_iso_date(data.get('last_verified_at'))
 
+        discord_profile = data.get('discord_profile')
+        if not isinstance(discord_profile, dict):
+            discord_profile = {}
+        discord_username = str(
+            data.get('discord_username')
+            or data.get('discord_name')
+            or discord_profile.get('username')
+            or ''
+        ).strip()
+        discord_display_name = str(
+            data.get('discord_display_name')
+            or data.get('discord_global_name')
+            or discord_profile.get('display_name')
+            or discord_profile.get('global_name')
+            or ''
+        ).strip()
+        discord_discriminator = str(
+            data.get('discord_discriminator')
+            or discord_profile.get('discriminator')
+            or ''
+        ).strip()
+        if not discord_display_name and discord_username:
+            discord_display_name = discord_username
+        discord_full_tag = ''
+        if discord_username:
+            if discord_discriminator and discord_discriminator not in {'', '0', '0000'}:
+                discord_full_tag = f"{discord_username}#{discord_discriminator}"
+            else:
+                discord_full_tag = discord_username
+        elif discord_display_name:
+            discord_full_tag = discord_display_name
+
         entry = {
             'discord_id': linked.discord_id,
+            'discord_profile_url': f"https://discord.com/users/{linked.discord_id}",
+            'discord_display_name': discord_display_name,
+            'discord_username': discord_username,
+            'discord_discriminator': discord_discriminator,
+            'discord_full_tag': discord_full_tag,
             'twitch_username': data.get('twitch_username') or '',
             'twitch_user_id': data.get('twitch_user_id') or '',
             'first_notice_at': first_notice_dt,

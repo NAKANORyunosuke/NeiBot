@@ -31,3 +31,4 @@ _projects/twitch-discord-bot.md
 _projects/twitch-discord-django.md
 notebooks/*
 *.pem
+test_users.ipynb

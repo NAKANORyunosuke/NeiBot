@@ -34,7 +34,23 @@
       <tbody>
         {% for user in unresolved_users %}
         <tr>
-          <td><code>{{ user.discord_id }}</code></td>
+          <td>
+            {% with primary=user.discord_display_name|default:user.discord_full_tag|default:user.discord_username %}
+              {% if primary %}
+                {% if user.discord_profile_url %}
+                <div><a href="{{ user.discord_profile_url }}" target="_blank" rel="noopener">{{ primary }}</a></div>
+                {% else %}
+                <div>{{ primary }}</div>
+                {% endif %}
+              {% else %}
+                <span class="text-muted">?</span>
+              {% endif %}
+            {% endwith %}
+            {% if user.discord_full_tag and user.discord_display_name and user.discord_display_name != user.discord_full_tag %}
+            <div class="text-muted small">{{ user.discord_full_tag }}</div>
+            {% endif %}
+            <div class="text-muted small">ID: <code>{{ user.discord_id }}</code></div>
+          </td>
           <td>
             {% if user.twitch_username %}
             <div>{{ user.twitch_username }}</div>
