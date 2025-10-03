@@ -31,7 +31,7 @@ body {
 }
 
 .page {
-  width: min(1024px, 100%);
+  width: min(1280px, 100%);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -870,7 +870,8 @@ input[type="submit"]:focus-visible,
   .insight-grid {
     grid-template-columns: 1fr;
   }
-}\n@media (max-width: 640px) {
+}
+@media (max-width: 640px) {
   .site-header {
     flex-direction: column;
     align-items: stretch;
@@ -887,4 +888,16 @@ input[type="submit"]:focus-visible,
 }
 
 
+
+
+@media (min-width: 1200px) {
+  .status-header,
+  .status-body {
+    flex-wrap: nowrap;
+  }
+  .status-body span,
+  .status-header span {
+    white-space: nowrap;
+  }
+}
 

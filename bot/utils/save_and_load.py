@@ -145,7 +145,8 @@ def _db_upsert_users(data: Dict[str, Any]) -> None:
             to_del = [x for x in existing if x not in keys]
             if to_del:
                 conn.executemany(
-                    f"DELETE FROM {LINKED_USERS_TABLE} WHERE discord_id = ?", [(x,) for x in to_del]
+                    f"DELETE FROM {LINKED_USERS_TABLE} WHERE discord_id = ?",
+                    [(x,) for x in to_del],
                 )
     finally:
         try:
@@ -159,7 +160,8 @@ def _db_get_user(discord_id: str) -> Optional[Dict[str, Any]]:
     try:
         _db_init(conn)
         cur = conn.execute(
-            f"SELECT data FROM {LINKED_USERS_TABLE} WHERE discord_id = ?", (str(discord_id),)
+            f"SELECT data FROM {LINKED_USERS_TABLE} WHERE discord_id = ?",
+            (str(discord_id),),
         )
         row = cur.fetchone()
         if not row:
@@ -180,7 +182,10 @@ def _db_delete_user(discord_id: str) -> None:
     try:
         _db_init(conn)
         with conn:
-            conn.execute(f"DELETE FROM {LINKED_USERS_TABLE} WHERE discord_id = ?", (str(discord_id),))
+            conn.execute(
+                f"DELETE FROM {LINKED_USERS_TABLE} WHERE discord_id = ?",
+                (str(discord_id),),
+            )
     finally:
         try:
             conn.close()
@@ -364,15 +369,105 @@ def save_linked_user(
 
 def save_all_guild_members(bot):
     data = load_users()
+    if not isinstance(data, dict):
+        data = {}
 
     guild_id = get_guild_id()
-    guild = bot.get_guild(guild_id)
+    try:
+        guild_ref = int(guild_id)
+    except (TypeError, ValueError):
+        guild_ref = guild_id
+    guild = bot.get_guild(guild_ref)
     if guild is None:
         return
-    existing = set(map(str, data.keys()))
-    for m in guild.members:
-        if not m.bot and str(m.id) not in existing:
-            ensure_user_entry(str(m.id))
+
+    def _clean(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    dirty = False
+
+    for member in guild.members:
+        if getattr(member, "bot", False):
+            continue
+
+        discord_id = str(member.id)
+        existing = data.get(discord_id)
+        is_new_entry = not isinstance(existing, dict)
+        if is_new_entry:
+            existing = {}
+        data[discord_id] = existing
+
+        changed = is_new_entry
+
+        def _set_field(key: str, value: Optional[str]) -> None:
+            nonlocal changed
+            if value is None:
+                return
+            if existing.get(key) != value:
+                existing[key] = value
+                changed = True
+
+        username = _clean(getattr(member, "name", None))
+        global_name = _clean(getattr(member, "global_name", None))
+        nickname = _clean(getattr(member, "nick", None))
+        display_name = _clean(getattr(member, "display_name", None))
+        if not display_name:
+            display_name = nickname or global_name or username
+        discriminator = _clean(getattr(member, "discriminator", None))
+
+        _set_field("discord_display_name", display_name)
+        _set_field("discord_username", username)
+        _set_field("discord_global_name", global_name)
+        _set_field("discord_discriminator", discriminator)
+        _set_field("discord_nickname", nickname)
+
+        profile_existing = existing.get("discord_profile")
+        if not isinstance(profile_existing, dict):
+            profile_existing = {}
+        profile_candidate = dict(profile_existing)
+        profile_changed = False
+
+        def _set_profile(key: str, value: Optional[str]) -> None:
+            nonlocal profile_changed
+            if value is None:
+                return
+            if profile_candidate.get(key) != value:
+                profile_candidate[key] = value
+                profile_changed = True
+
+        _set_profile("id", discord_id)
+        _set_profile("username", username)
+        _set_profile("display_name", display_name)
+        _set_profile("global_name", global_name)
+        _set_profile("discriminator", discriminator)
+        _set_profile("nickname", nickname)
+
+        avatar_url = None
+        try:
+            avatar_url = getattr(getattr(member, "display_avatar", None), "url", None)
+        except Exception:
+            avatar_url = None
+        _set_profile("avatar_url", _clean(avatar_url))
+        _set_profile("mention", _clean(getattr(member, "mention", None)))
+
+        if profile_changed:
+            existing["discord_profile"] = profile_candidate
+            changed = True
+
+        if changed:
+            dirty = True
+            try:
+                _db_upsert_user(discord_id, existing)
+            except Exception:
+                pass
+
+    print(data)
+
+    if dirty:
+        save_file(data, USERS_FILE)
 
 
 def get_taken_json():
@@ -415,7 +510,9 @@ def ensure_user_entry(discord_id: str) -> None:
     save_file(data, USERS_FILE)
 
 
-def patch_linked_user(discord_id: str, updates: Dict[str, Any], *, include_none: bool = False) -> Dict[str, Any]:
+def patch_linked_user(
+    discord_id: str, updates: Dict[str, Any], *, include_none: bool = False
+) -> Dict[str, Any]:
     did = str(discord_id)
     try:
         current = _db_get_user(did) or {}
@@ -487,7 +584,9 @@ def inbox_enqueue_event(
             pass
 
 
-def inbox_mark_processed(source: str, delivery_id: str, *, ok: bool, error: str | None = None) -> None:
+def inbox_mark_processed(
+    source: str, delivery_id: str, *, ok: bool, error: str | None = None
+) -> None:
     conn = _db_connect()
     try:
         _db_init(conn)
