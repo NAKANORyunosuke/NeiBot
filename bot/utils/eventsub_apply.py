@@ -120,7 +120,9 @@ def apply_event_to_linked_users(
                     current = get_linked_user(did)
                 except Exception:
                     current = {}
-                total_prev = current.get("total_cheer_bits") if isinstance(current, dict) else 0
+                total_prev = (
+                    current.get("total_cheer_bits") if isinstance(current, dict) else 0
+                )
                 try:
                     total_prev = int(total_prev or 0)
                 except (TypeError, ValueError):

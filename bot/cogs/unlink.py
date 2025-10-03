@@ -8,8 +8,7 @@ class Unlink(commands.Cog):
         self.bot = bot
 
     @discord.slash_command(
-        name="unlink",
-        description="あなたのTwitchリンクを解除します"
+        name="unlink", description="あなたのTwitchリンクを解除します"
     )
     async def unlink(self, ctx: discord.ApplicationContext):
         discord_id = str(ctx.author.id)
@@ -17,9 +16,13 @@ class Unlink(commands.Cog):
 
         if discord_id in linked_users:
             delete_linked_user(discord_id)
-            await ctx.respond("Twitchアカウントとのリンクを解除しました ✅", ephemeral=True)
+            await ctx.respond(
+                "Twitchアカウントとのリンクを解除しました ✅", ephemeral=True
+            )
         else:
-            await ctx.respond("あなたのアカウントはTwitchとリンクされていません。", ephemeral=True)
+            await ctx.respond(
+                "あなたのアカウントはTwitchとリンクされていません。", ephemeral=True
+            )
 
 
 def setup(bot):

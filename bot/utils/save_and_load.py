@@ -464,8 +464,6 @@ def save_all_guild_members(bot):
             except Exception:
                 pass
 
-    print(data)
-
     if dirty:
         save_file(data, USERS_FILE)
 

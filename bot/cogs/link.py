@@ -23,7 +23,9 @@ class LinkCog(commands.Cog):
 
     @staticmethod
     def _role_name_map(role_conf: Dict[str, int]) -> Dict[str, Optional[int]]:
-        return {str(name): rid for name, rid in role_conf.items() if isinstance(rid, int)}
+        return {
+            str(name): rid for name, rid in role_conf.items() if isinstance(rid, int)
+        }
 
     @staticmethod
     def _subscription_tier_map() -> Dict[str, str]:
@@ -70,7 +72,9 @@ class LinkCog(commands.Cog):
 
         role_name_map = self._role_name_map(role_conf)
         subscription_map = self._subscription_tier_map()
-        linked_role_id = role_name_map.get("Twitch-linked") or role_name_map.get("twitch_linked")
+        linked_role_id = role_name_map.get("Twitch-linked") or role_name_map.get(
+            "twitch_linked"
+        )
         tier_role_id = None
         if tier:
             tier_key_map = {
@@ -199,11 +203,21 @@ class LinkCog(commands.Cog):
 
             try:
                 await ctx.author.send(msg)
-                patch_linked_user(discord_id, {"dm_failed": False, "dm_failed_reason": None}, include_none=True)
+                patch_linked_user(
+                    discord_id,
+                    {"dm_failed": False, "dm_failed_reason": None},
+                    include_none=True,
+                )
             except discord.Forbidden:
-                patch_linked_user(discord_id, {"dm_failed": True, "dm_failed_reason": "DM拒否 (Forbidden)"})
+                patch_linked_user(
+                    discord_id,
+                    {"dm_failed": True, "dm_failed_reason": "DM拒否 (Forbidden)"},
+                )
             except discord.HTTPException as e:
-                patch_linked_user(discord_id, {"dm_failed": True, "dm_failed_reason": f"HTTPエラー: {e}"})
+                patch_linked_user(
+                    discord_id,
+                    {"dm_failed": True, "dm_failed_reason": f"HTTPエラー: {e}"},
+                )
             finally:
                 return
 

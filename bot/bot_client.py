@@ -101,9 +101,7 @@ def _load_subscription_definition() -> dict[str, Any]:
             merged[key] = value
 
     tiers: list[dict[str, Any]] = []
-    user_tiers = (
-        user_config.get("tiers") if isinstance(user_config, dict) else None
-    )
+    user_tiers = user_config.get("tiers") if isinstance(user_config, dict) else None
     if isinstance(user_tiers, list) and user_tiers:
         for idx, entry in enumerate(user_tiers):
             if not isinstance(entry, dict):
@@ -119,8 +117,7 @@ def _load_subscription_definition() -> dict[str, Any]:
                     "category_name": entry.get("category_name")
                     or entry.get("role_name")
                     or f"Category{idx + 1}",
-                    "channel_name": entry.get("channel_name")
-                    or f"channel-{idx + 1}",
+                    "channel_name": entry.get("channel_name") or f"channel-{idx + 1}",
                     "view_roles": entry.get("view_roles")
                     or [entry.get("key") or f"tier{idx + 1}"],
                 }
@@ -152,7 +149,9 @@ CATEGORY_ALLOWED_ROLE_NAMES: dict[str, list[str]] = {}
 for entry in TIER_CONFIG:
     key = str(entry.get("key") or f"tier{len(TIER_ENTRIES) + 1}")
     role_name = str(entry.get("role_name") or key)
-    category_name = str(entry.get("category_name") or entry.get("channel_name") or role_name)
+    category_name = str(
+        entry.get("category_name") or entry.get("channel_name") or role_name
+    )
     channel_name = str(entry.get("channel_name") or role_name)
     allowed = entry.get("view_roles") or [key]
 
@@ -317,7 +316,9 @@ async def _send_dm(
                     debug_print(f"[DM] reading local attachment: {path}")
                     with open(path, "rb") as fp:
                         data = fp.read()
-                    filename_local = display_name or os.path.basename(path) or "attachment"
+                    filename_local = (
+                        display_name or os.path.basename(path) or "attachment"
+                    )
                     return data, filename_local
                 debug_print(f"[DM] local attachment not found: {path}")
             except Exception as exc:
@@ -328,7 +329,9 @@ async def _send_dm(
                     debug_print(f"[DM] downloading attachment: {url}")
                     response = await client.get(url)
                     response.raise_for_status()
-                    filename_remote = display_name or url.rsplit("/", 1)[-1] or "attachment"
+                    filename_remote = (
+                        display_name or url.rsplit("/", 1)[-1] or "attachment"
+                    )
                     debug_print(
                         f"[DM] downloaded: status={response.status_code} bytes={len(response.content)}"
                     )
@@ -530,7 +533,9 @@ async def notify_stream_online(event: dict[str, Any]) -> None:
         except Exception:
             started_display = None
 
-    twitch_url = f"https://www.twitch.tv/{broadcaster_login}" if broadcaster_login else None
+    twitch_url = (
+        f"https://www.twitch.tv/{broadcaster_login}" if broadcaster_login else None
+    )
     channel_map = load_channel_ids()
 
     for guild in bot.guilds:
@@ -755,9 +760,11 @@ async def send_role_dm(
             attachments,
             file_url,
             file_path,
-            int(guild_id)
-            if guild_id is not None
-            else getattr(resolved_guild, "id", None),
+            (
+                int(guild_id)
+                if guild_id is not None
+                else getattr(resolved_guild, "id", None)
+            ),
         )
     )
     debug_print("[/send_role_dm] queued notify task")
