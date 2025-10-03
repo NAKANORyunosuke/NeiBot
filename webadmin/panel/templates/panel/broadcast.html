@@ -1,6 +1,119 @@
 
 {% extends "panel/base.html" %}
 {% block title %}ロールDM送信 | NeiBot 管理パネル{% endblock %}
+{% block extra_head %}
+  {{ block.super }}
+  {% if recipient_popup %}
+  <style>
+    .recipient-actions {
+      margin: 1rem 0 1.5rem;
+    }
+    .recipient-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.6rem 1.2rem;
+      border-radius: 999px;
+      border: 1px solid #3b82f6;
+      background-color: #eff6ff;
+      color: #1d4ed8;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+    .recipient-trigger:hover,
+    .recipient-trigger:focus {
+      background-color: #dbeafe;
+      color: #1e3a8a;
+    }
+    .recipient-modal-backdrop[hidden] {
+      display: none;
+    }
+    .recipient-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      z-index: 1000;
+    }
+    .recipient-modal {
+      background: #ffffff;
+      width: min(520px, 100%);
+      max-height: 80vh;
+      border-radius: 10px;
+      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .recipient-modal__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    }
+    .recipient-modal__header h2 {
+      margin: 0;
+      font-size: 1.1rem;
+    }
+    .recipient-modal__meta {
+      padding: 0.6rem 1.5rem;
+      font-size: 0.9rem;
+      color: #475569;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    }
+    .recipient-modal__meta div + div {
+      margin-top: 0.25rem;
+    }
+    .recipient-modal__body {
+      padding: 1rem 1.5rem 1.4rem;
+      overflow-y: auto;
+    }
+    .recipient-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.6rem;
+    }
+    .recipient-list li {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    }
+    .recipient-list li:last-of-type {
+      border-bottom: none;
+    }
+    .recipient-name {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .recipient-meta {
+      font-size: 0.85rem;
+      color: #475569;
+    }
+    .recipient-close {
+      border: none;
+      background: transparent;
+      color: #475569;
+      font-size: 1.5rem;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0.2rem;
+    }
+    .recipient-close:hover,
+    .recipient-close:focus {
+      color: #1e293b;
+    }
+  </style>
+  {% endif %}
+{% endblock %}
 
 {% block content %}
 <div class="card">
@@ -11,6 +124,62 @@
 
   {% if user.is_authenticated %}
     {% if user.is_staff %}
+    {% if recipient_popup %}
+    <div class="recipient-actions">
+      <button
+        type="button"
+        class="recipient-trigger"
+        data-recipient-open
+        aria-haspopup="dialog"
+        aria-controls="recipientModal"
+        aria-expanded="false"
+      >
+        送信先リストを表示 ({{ recipient_popup.count }}件)
+      </button>
+    </div>
+    <div
+      class="recipient-modal-backdrop"
+      data-recipient-modal
+      id="recipientModal"
+      hidden
+      aria-hidden="true"
+    >
+      <div class="recipient-modal" role="dialog" aria-modal="true" aria-labelledby="recipientModalTitle">
+        <div class="recipient-modal__header">
+          <h2 id="recipientModalTitle">送信先リスト</h2>
+          <button type="button" class="recipient-close" data-recipient-close aria-label="閉じる">
+            &times;
+          </button>
+        </div>
+        <div class="recipient-modal__meta">
+          {% if recipient_popup.guild_name %}
+          <div>サーバー: {{ recipient_popup.guild_name }}</div>
+          {% endif %}
+          {% if recipient_popup.roles %}
+          <div>対象ロール: {{ recipient_popup.roles|join:"、" }}</div>
+          {% endif %}
+          <div>合計: {{ recipient_popup.count }}件</div>
+        </div>
+        <div class="recipient-modal__body">
+          {% if recipient_popup.recipients %}
+          <ul class="recipient-list">
+            {% for item in recipient_popup.recipients %}
+            <li>
+              <span class="recipient-name">{{ item.label }}</span>
+              {% if item.tag %}
+              <span class="recipient-meta">@{{ item.tag }}</span>
+              {% endif %}
+              <span class="recipient-meta">ID: {{ item.id }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="recipient-meta">対象メンバーが見つかりませんでした。</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
     <form method="post" enctype="multipart/form-data" class="form-grid" data-role-form>
       {% csrf_token %}
       {% if form.non_field_errors %}
@@ -95,12 +264,12 @@
       </div>
 
       <div class="form-field">
-        <label for="id_attachment">添付ファイル</label>
-        {{ form.attachment }}
-        <div class="helper-text">オプション：最大サイズにご注意ください。</div>
-        {% if form.attachment.errors %}
+        <label for="id_attachments">添付ファイル</label>
+        {{ form.attachments }}
+        <div class="helper-text">オプション：複数選択可能です。各ファイルのサイズにご注意ください。</div>
+        {% if form.attachments.errors %}
         <ul class="error-list">
-          {% for error in form.attachment.errors %}
+          {% for error in form.attachments.errors %}
           <li>{{ error }}</li>
           {% endfor %}
         </ul>
@@ -129,61 +298,95 @@
         const listEl = document.querySelector('[data-role-list]');
         const addBtn = document.querySelector('[data-add-role]');
         const template = document.getElementById('role-select-template');
-        if (!listEl || !addBtn || !template) {
-          return;
+
+        if (listEl && addBtn && template) {
+          const updateRemoveButtons = () => {
+            const buttons = listEl.querySelectorAll('[data-remove-role]');
+            const disable = buttons.length <= 1;
+            buttons.forEach((btn) => {
+              btn.disabled = disable;
+              btn.classList.toggle('is-disabled', disable);
+            });
+          };
+
+          const addRoleSelect = (value = '') => {
+            const fragment = template.content.cloneNode(true);
+            const item = fragment.querySelector('.role-select-item');
+            const selectEl = item.querySelector('select');
+            if (value) {
+              selectEl.value = value;
+              if (selectEl.value !== value) {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                option.selected = true;
+                selectEl.appendChild(option);
+              }
+            }
+            listEl.appendChild(item);
+            updateRemoveButtons();
+          };
+
+          addBtn.addEventListener('click', () => {
+            addRoleSelect();
+          });
+
+          listEl.addEventListener('click', (event) => {
+            const target = event.target.closest('[data-remove-role]');
+            if (!target || target.disabled) {
+              return;
+            }
+            const item = target.closest('.role-select-item');
+            if (item) {
+              item.remove();
+            }
+            if (!listEl.querySelector('.role-select-item')) {
+              addRoleSelect();
+            } else {
+              updateRemoveButtons();
+            }
+          });
+
+          updateRemoveButtons();
         }
 
-        const updateRemoveButtons = () => {
-          const buttons = listEl.querySelectorAll('[data-remove-role]');
-          const disable = buttons.length <= 1;
-          buttons.forEach((btn) => {
-            btn.disabled = disable;
-            btn.classList.toggle('is-disabled', disable);
-          });
-        };
-
-        const addRoleSelect = (value = '') => {
-          const fragment = template.content.cloneNode(true);
-          const item = fragment.querySelector('.role-select-item');
-          const selectEl = item.querySelector('select');
-          if (value) {
-            selectEl.value = value;
-            if (selectEl.value !== value) {
-              const option = document.createElement('option');
-              option.value = value;
-              option.textContent = value;
-              option.selected = true;
-              selectEl.appendChild(option);
+        const modalBackdrop = document.querySelector('[data-recipient-modal]');
+        const modalOpenBtn = document.querySelector('[data-recipient-open]');
+        if (modalBackdrop && modalOpenBtn) {
+          const modalCloseBtn = modalBackdrop.querySelector('[data-recipient-close]');
+          const closeModal = () => {
+            modalBackdrop.hidden = true;
+            modalBackdrop.setAttribute('aria-hidden', 'true');
+            modalOpenBtn.setAttribute('aria-expanded', 'false');
+            modalOpenBtn.focus();
+          };
+          const openModal = () => {
+            modalBackdrop.hidden = false;
+            modalBackdrop.setAttribute('aria-hidden', 'false');
+            modalOpenBtn.setAttribute('aria-expanded', 'true');
+            if (modalCloseBtn) {
+              modalCloseBtn.focus();
             }
+          };
+          modalOpenBtn.addEventListener('click', () => {
+            openModal();
+          });
+          if (modalCloseBtn) {
+            modalCloseBtn.addEventListener('click', () => {
+              closeModal();
+            });
           }
-          listEl.appendChild(item);
-          updateRemoveButtons();
-        };
-
-        addBtn.addEventListener('click', () => {
-          addRoleSelect();
-        });
-
-        listEl.addEventListener('click', (event) => {
-          const target = event.target.closest('[data-remove-role]');
-          if (!target) {
-            return;
-          }
-          if (target.disabled) {
-            return;
-          }
-          const item = target.closest('.role-select-item');
-          if (item) {
-            item.remove();
-          }
-          if (!listEl.querySelector('.role-select-item')) {
-            addRoleSelect();
-          } else {
-            updateRemoveButtons();
-          }
-        });
-
-        updateRemoveButtons();
+          modalBackdrop.addEventListener('click', (event) => {
+            if (event.target === modalBackdrop) {
+              closeModal();
+            }
+          });
+          document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !modalBackdrop.hidden) {
+              closeModal();
+            }
+          });
+        }
       });
     </script>
     {% else %}

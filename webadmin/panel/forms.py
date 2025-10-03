@@ -5,11 +5,19 @@ import requests
 import re
 
 
+class MultiFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
 class RoleBroadcastForm(forms.Form):
     guild_id = forms.ChoiceField(label="サーバー", choices=())
     role_ids = forms.MultipleChoiceField(label="ロール", choices=(), required=False)
     message = forms.CharField(label="メッセージ", widget=forms.Textarea, required=False)
-    attachment = forms.FileField(label="添付ファイル", required=False)
+    attachments = forms.FileField(
+        label="添付ファイル",
+        required=False,
+        widget=MultiFileInput(attrs={"multiple": True}),
+    )
 
     # 8MB は Discord DM の添付制限
     MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
@@ -58,14 +66,17 @@ class RoleBroadcastForm(forms.Form):
         if not self.is_bound and roles:
             self.initial.setdefault("role_ids", [roles[0][0]])
 
-    def clean_attachment(self):
-        f = self.cleaned_data.get("attachment")
-        if not f:
-            return f
-        size = getattr(f, "size", None)
-        if size is not None and size > self.MAX_ATTACHMENT_BYTES:
-            raise forms.ValidationError("添付ファイルは8MB以下にしてください。")
-        return f
+    def clean_attachments(self):
+        files = self.files.getlist("attachments") if hasattr(self, "files") else []
+        cleaned = []
+        for f in files:
+            if f is None:
+                continue
+            size = getattr(f, "size", None)
+            if size is not None and size > self.MAX_ATTACHMENT_BYTES:
+                raise forms.ValidationError("添付ファイルは8MB以下にしてください。")
+            cleaned.append(f)
+        return cleaned
 
     def clean_message(self):
         msg = self.cleaned_data.get("message") or ""

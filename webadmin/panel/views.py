@@ -6,6 +6,7 @@ import csv
 import io
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from uuid import uuid4
 
 import requests
 from allauth.socialaccount.models import SocialAccount
@@ -787,6 +788,13 @@ def broadcast(request: HttpRequest) -> HttpResponse:
     if not request.user.is_staff:
         return HttpResponseForbidden("このページへアクセスする権限がありません。")
 
+    recipient_popup: Optional[Dict[str, Any]] = request.session.get(
+        "last_role_dm_recipients"
+    )
+    if request.method == "POST":
+        request.session.pop("last_role_dm_recipients", None)
+        recipient_popup = None
+
     if request.method == "POST":
         form = RoleBroadcastForm(request.POST, request.FILES)
         refresh_requested = bool(request.POST.get("refresh"))
@@ -795,20 +803,33 @@ def broadcast(request: HttpRequest) -> HttpResponse:
             guild_id_value = form.cleaned_data.get("guild_id")
             guild_id = int(guild_id_value) if guild_id_value else None
             message = form.cleaned_data["message"] or ""
-            file_url = None
-            file_path = None
+            attachments: List[Dict[str, Any]] = []
 
-            f = form.cleaned_data.get("attachment")
-            if f:
+            uploaded_files = form.cleaned_data.get("attachments") or []
+            if uploaded_files:
                 from django.core.files.base import ContentFile
                 from django.core.files.storage import default_storage
 
-                rel_path = default_storage.save(
-                    f"uploads/{f.name}", ContentFile(f.read())
-                )
-                url_path = str(rel_path).replace("\\", "/").lstrip("/")
-                file_url = request.build_absolute_uri(settings.MEDIA_URL + url_path)
-                file_path = str((Path(settings.MEDIA_ROOT) / rel_path).resolve())
+                for upload in uploaded_files:
+                    if not upload:
+                        continue
+                    unique_name = f"{uuid4().hex}_{upload.name}"
+                    rel_path = default_storage.save(
+                        f"uploads/{unique_name}", ContentFile(upload.read())
+                    )
+                    url_path = str(rel_path).replace("\\", "/").lstrip("/")
+                    file_url = request.build_absolute_uri(
+                        settings.MEDIA_URL + url_path
+                    )
+                    file_path = str((Path(settings.MEDIA_ROOT) / rel_path).resolve())
+                    attachments.append(
+                        {
+                            "url": file_url,
+                            "path": file_path,
+                            "name": upload.name,
+                            "size": getattr(upload, "size", None),
+                        }
+                    )
 
             headers = (
                 {"Authorization": f"Bearer {settings.ADMIN_API_TOKEN}"}
@@ -820,15 +841,19 @@ def broadcast(request: HttpRequest) -> HttpResponse:
             }
             success_roles: List[str] = []
             failed_roles: List[Tuple[str, str]] = []
+            aggregated_recipients: Dict[str, Dict[str, Any]] = {}
+            last_meta: Dict[str, Any] | None = None
 
             for rid in role_ids:
                 payload: Dict[str, Any] = {"role_id": rid, "message": message}
                 if guild_id:
                     payload["guild_id"] = guild_id
-                if file_url:
-                    payload["file_url"] = file_url
-                if file_path:
-                    payload["file_path"] = file_path
+                if attachments:
+                    payload["attachments"] = attachments
+                    # Backward compatibility: keep first attachment fields
+                    first = attachments[0]
+                    payload.setdefault("file_url", first.get("url"))
+                    payload.setdefault("file_path", first.get("path"))
                 try:
                     resp = requests.post(
                         f"{settings.BOT_ADMIN_API_BASE}/send_role_dm",
@@ -843,10 +868,64 @@ def broadcast(request: HttpRequest) -> HttpResponse:
                     continue
 
                 if resp.status_code == 200:
-                    success_roles.append(role_labels.get(str(rid), str(rid)))
+                    role_label = role_labels.get(str(rid), str(rid))
+                    success_roles.append(role_label)
+                    data: Dict[str, Any]
+                    try:
+                        data = resp.json()
+                    except ValueError:
+                        data = {}
+                    recipients_payload = data.get("recipients") or []
+                    for entry in recipients_payload:
+                        if not isinstance(entry, dict):
+                            continue
+                        raw_id = entry.get("id")
+                        if raw_id is None:
+                            continue
+                        user_id = str(raw_id)
+                        display_name = str(entry.get("display_name") or "").strip()
+                        username_value = entry.get("username") or entry.get("name")
+                        username = str(username_value).strip() if username_value else ""
+                        discriminator = entry.get("discriminator")
+                        if discriminator in (None, "", "0", 0):
+                            discriminator = None
+                        label = display_name or username or user_id
+                        tag = None
+                        if username:
+                            tag = username
+                            if discriminator:
+                                tag = f"{tag}#{discriminator}"
+                        aggregated_recipients[user_id] = {
+                            "id": user_id,
+                            "label": label,
+                            "display_name": display_name or None,
+                            "username": username or None,
+                            "tag": tag,
+                        }
+                    if recipients_payload:
+                        last_meta = {
+                            "guild_name": data.get("guild_name"),
+                            "role_name": data.get("role_name") or role_label,
+                        }
                 else:
                     reason = f"{resp.status_code} {resp.text}".strip()
                     failed_roles.append((role_labels.get(str(rid), str(rid)), reason))
+
+            if aggregated_recipients:
+                sorted_recipients = sorted(
+                    aggregated_recipients.values(),
+                    key=lambda item: (item.get("label") or item.get("id") or "").casefold(),
+                )
+                recipient_popup = {
+                    "recipients": sorted_recipients,
+                    "count": len(sorted_recipients),
+                    "roles": success_roles,
+                    "generated_at": timezone.now().isoformat(),
+                }
+                if last_meta and last_meta.get("guild_name"):
+                    recipient_popup["guild_name"] = last_meta["guild_name"]
+                request.session["last_role_dm_recipients"] = recipient_popup
+                request.session.modified = True
 
             if success_roles:
                 if len(success_roles) == 1:
@@ -877,10 +956,17 @@ def broadcast(request: HttpRequest) -> HttpResponse:
     except Exception:
         twitch_account = None
 
+    if request.method == "GET" and recipient_popup:
+        request.session.pop("last_role_dm_recipients", None)
+
     return render(
         request,
         "panel/broadcast.html",
-        {"form": form, "twitch_account": twitch_account},
+        {
+            "form": form,
+            "twitch_account": twitch_account,
+            "recipient_popup": recipient_popup,
+        },
     )
 
 

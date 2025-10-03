@@ -152,48 +152,137 @@ async def notify_discord_user(
 async def _send_dm(
     user: discord.User | discord.Member,
     message: str,
+    attachments: list[dict[str, Any]] | None = None,
     file_url: str | None = None,
     file_path: str | None = None,
 ):
-    try:
-        debug_print(
-            f"[DM] start -> user={getattr(user, 'id', '?')} has_url={bool(file_url)} has_path={bool(file_path)} msg_len={(len(message or ''))}"
-        )
-        buf = None
-        filename = None
-        # Prefer local filesystem if provided (same host)
-        if file_path:
-            try:
-                if os.path.isfile(file_path):
-                    debug_print(f"[DM] reading local attachment: {file_path}")
-                    with open(file_path, "rb") as fp:
-                        data = fp.read()
-                    buf = io.BytesIO(data)
-                    filename = os.path.basename(file_path) or "attachment"
-                else:
-                    debug_print(f"[DM] local attachment not found: {file_path}")
-            except Exception as e:
-                debug_print(f"[DM] failed reading local file: {e!r}")
-        # Fallback to HTTP(S) download
-        if buf is None and file_url:
-            async with httpx.AsyncClient(timeout=20) as client:
-                debug_print(f"[DM] downloading attachment: {file_url}")
-                r = await client.get(file_url)
-                r.raise_for_status()
-                buf = io.BytesIO(r.content)
-                debug_print(
-                    f"[DM] downloaded: status={r.status_code} bytes={len(r.content)}"
-                )
-            filename = filename or file_url.rsplit("/", 1)[-1] or "attachment"
+    MAX_FILES_PER_MESSAGE = 10
 
-        if buf is not None:
-            await user.send(content=(message or None), file=discord.File(buf, filename))
-            debug_print(
-                f"[DM] sent with file -> user={getattr(user, 'id', '?')} {filename}"
+    async def _load_bytes(spec: dict[str, Any]) -> tuple[bytes, str] | None:
+        path = spec.get("path")
+        url = spec.get("url")
+        display_name = spec.get("name")
+        if path:
+            try:
+                if os.path.isfile(path):
+                    debug_print(f"[DM] reading local attachment: {path}")
+                    with open(path, "rb") as fp:
+                        data = fp.read()
+                    filename_local = display_name or os.path.basename(path) or "attachment"
+                    return data, filename_local
+                debug_print(f"[DM] local attachment not found: {path}")
+            except Exception as exc:
+                debug_print(f"[DM] failed reading local file: {exc!r}")
+        if url:
+            try:
+                async with httpx.AsyncClient(timeout=20) as client:
+                    debug_print(f"[DM] downloading attachment: {url}")
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    filename_remote = display_name or url.rsplit("/", 1)[-1] or "attachment"
+                    debug_print(
+                        f"[DM] downloaded: status={response.status_code} bytes={len(response.content)}"
+                    )
+                    return response.content, filename_remote
+            except Exception as exc:
+                debug_print(f"[DM] failed downloading file: {exc!r}")
+        return None
+
+    def _make_file_objects(items: list[tuple[bytes, str]]) -> list[discord.File]:
+        files: list[discord.File] = []
+        for data, filename in items:
+            files.append(discord.File(io.BytesIO(data), filename))
+        return files
+
+    async def _send_sequential(
+        target: discord.User | discord.Member,
+        text: str,
+        items: list[tuple[bytes, str]],
+    ) -> None:
+        if text:
+            try:
+                await target.send(content=text)
+                debug_print(
+                    f"[DM] sent text fallback -> user={getattr(target, 'id', '?')}"
+                )
+            except Exception as exc:
+                debug_print(
+                    f"[DM] fallback text failed user={getattr(target, 'id', '?')}: {exc!r}"
+                )
+        for data, filename in items:
+            try:
+                await target.send(file=discord.File(io.BytesIO(data), filename))
+                debug_print(
+                    f"[DM] sent attachment fallback -> user={getattr(target, 'id', '?')} {filename}"
+                )
+            except Exception as exc:
+                debug_print(
+                    f"[DM] fallback attachment failed user={getattr(target, 'id', '?')} file={filename}: {exc!r}"
+                )
+
+    try:
+        attachment_specs: list[dict[str, Any]] = []
+        if attachments:
+            for item in attachments:
+                if isinstance(item, dict):
+                    attachment_specs.append(
+                        {
+                            "url": item.get("url") or item.get("file_url"),
+                            "path": item.get("path") or item.get("file_path"),
+                            "name": item.get("name"),
+                        }
+                    )
+        if (file_url or file_path) and not attachment_specs:
+            attachment_specs.append(
+                {
+                    "url": file_url,
+                    "path": file_path,
+                    "name": None,
+                }
             )
-        else:
-            await user.send(content=message)
+
+        debug_print(
+            f"[DM] start -> user={getattr(user, 'id', '?')} attachments={len(attachment_specs)} msg_len={(len(message or ''))}"
+        )
+
+        prepared: list[tuple[bytes, str]] = []
+        for spec in attachment_specs:
+            loaded = await _load_bytes(spec)
+            if loaded is None:
+                continue
+            prepared.append(loaded)
+
+        if not prepared:
+            await user.send(content=message or None)
             debug_print(f"[DM] sent text -> user={getattr(user, 'id', '?')}")
+            return
+
+        if len(prepared) > MAX_FILES_PER_MESSAGE:
+            debug_print(
+                f"[DM] too many attachments ({len(prepared)}) -> sending sequentially"
+            )
+            await _send_sequential(user, message, prepared)
+            return
+
+        try:
+            files = _make_file_objects(prepared)
+            if len(files) == 1:
+                await user.send(content=(message or None), file=files[0])
+            else:
+                await user.send(content=(message or None), files=files)
+            debug_print(
+                f"[DM] sent with {len(files)} attachment(s) -> user={getattr(user, 'id', '?')}"
+            )
+        except discord.HTTPException as exc:
+            debug_print(
+                f"[DM] send with attachments failed user={getattr(user, 'id', '?')}: {exc!r}; falling back"
+            )
+            await _send_sequential(user, message, prepared)
+        except Exception as exc:
+            debug_print(
+                f"[DM] unexpected send error user={getattr(user, 'id', '?')}: {exc!r}; falling back"
+            )
+            await _send_sequential(user, message, prepared)
     except Exception as e:
         debug_print(f"[DM] failed to {getattr(user, 'id', '?')}: {e!r}")
 
@@ -201,13 +290,15 @@ async def _send_dm(
 async def notify_role_members(
     role_id: int,
     message: str,
+    attachments: list[dict[str, Any]] | None = None,
     file_url: str | None = None,
     file_path: str | None = None,
     guild_id: int | None = None,
 ):
     await bot.wait_until_ready()
+    attachments_count = len(attachments or [])
     debug_print(
-        f"[/send_role_dm] begin notify_role_members role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} has_file={bool(file_url)}"
+        f"[/send_role_dm] begin notify_role_members role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} attachments={attachments_count} has_legacy_file={bool(file_url or file_path)}"
     )
     guild: discord.Guild | None = None
     if guild_id is not None:
@@ -251,7 +342,13 @@ async def notify_role_members(
                 dm_text = dm_text.replace("{user}", str(username))
         except Exception:
             dm_text = message
-        await _send_dm(m, dm_text, file_url, file_path)
+        await _send_dm(
+            m,
+            dm_text,
+            attachments=attachments,
+            file_url=file_url,
+            file_path=file_path,
+        )
         await asyncio.sleep(0.3)
     debug_print(
         f"[/send_role_dm] done for role_id={role_id} guild_id={getattr(guild, 'id', None)}"
@@ -347,7 +444,20 @@ async def send_role_dm(
     message = str(payload.get("message") or "")
     file_url = payload.get("file_url")
     file_path = payload.get("file_path")
-    guild_id = payload.get("guild_id")
+    attachments_payload = payload.get("attachments") or []
+    attachments: list[dict[str, Any]] = []
+    if isinstance(attachments_payload, list):
+        for item in attachments_payload:
+            if not isinstance(item, dict):
+                continue
+            attachments.append(
+                {
+                    "url": item.get("url") or item.get("file_url"),
+                    "path": item.get("path") or item.get("file_path"),
+                    "name": item.get("name"),
+                }
+            )
+    guild_id_value = payload.get("guild_id")
     # Validate placeholders and reject unknown ones
     unknown = _unknown_placeholders(message)
     if unknown:
@@ -359,20 +469,87 @@ async def send_role_dm(
             },
             status_code=400,
         )
+    attachments_count = len(attachments)
+    if attachments_count == 0 and (file_url or file_path):
+        attachments.append({"url": file_url, "path": file_path, "name": None})
+        attachments_count = len(attachments)
+
+    guild_id: int | None = int(guild_id_value) if guild_id_value else None
+
     debug_print(
-        f"[/send_role_dm] payload role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} has_file={bool(file_url)}"
+        f"[/send_role_dm] payload role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} attachments={attachments_count}"
     )
+
+    await bot.wait_until_ready()
+    resolved_guild: discord.Guild | None = None
+    resolved_role: discord.Role | None = None
+    recipients: list[dict[str, Any]] = []
+    try:
+        if guild_id is not None:
+            resolved_guild = bot.get_guild(int(guild_id))
+        if resolved_guild is None:
+            for guild in bot.guilds:
+                role_candidate = guild.get_role(int(role_id))
+                if role_candidate is not None:
+                    resolved_guild = guild
+                    resolved_role = role_candidate
+                    break
+        if resolved_guild is None:
+            try:
+                fallback_gid = get_guild_id()
+                resolved_guild = bot.get_guild(int(fallback_gid))
+            except Exception:
+                resolved_guild = None
+        if resolved_guild and resolved_role is None:
+            resolved_role = resolved_guild.get_role(int(role_id))
+        if resolved_role:
+            for member in resolved_role.members:
+                if getattr(member, "bot", False):
+                    continue
+                display_name = (
+                    getattr(member, "display_name", None)
+                    or getattr(member, "nick", None)
+                    or getattr(member, "name", None)
+                    or str(member)
+                )
+                username = getattr(member, "name", None) or str(member)
+                discriminator = getattr(member, "discriminator", None)
+                recipients.append(
+                    {
+                        "id": int(member.id),
+                        "display_name": str(display_name),
+                        "username": str(username),
+                        "discriminator": discriminator,
+                    }
+                )
+        debug_print(
+            f"[/send_role_dm] resolved recipients={len(recipients)} guild={getattr(resolved_guild, 'id', None)}"
+        )
+    except Exception as exc:
+        debug_print(f"[/send_role_dm] failed to resolve recipients: {exc!r}")
+
     schedule_in_bot_loop(
         notify_role_members(
             role_id,
             message,
+            attachments,
             file_url,
             file_path,
-            int(guild_id) if guild_id else None,
+            int(guild_id)
+            if guild_id is not None
+            else getattr(resolved_guild, "id", None),
         )
     )
     debug_print("[/send_role_dm] queued notify task")
-    return {"status": "queued"}
+    return {
+        "status": "queued",
+        "recipients": recipients,
+        "recipient_count": len(recipients),
+        "guild_id": getattr(resolved_guild, "id", None),
+        "guild_name": getattr(resolved_guild, "name", None),
+        "role_id": role_id,
+        "role_name": getattr(resolved_role, "name", None),
+    }
 
 
 # ---- API: Twitch OAuth コールバック ----
