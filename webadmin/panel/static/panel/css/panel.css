@@ -255,7 +255,35 @@ input[type="submit"]:focus-visible,
   min-width: 0;
 }
 
+.attachment-input-list {
+  display: grid;
+  gap: 12px;
+}
+
+.attachment-input-item {
+  display: grid;
+  gap: 6px;
+}
+
+.attachment-input-item .role-select-item {
+  width: 100%;
+}
+
+.attachment-input-item .attachment-input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.attachment-file-note {
+  margin-top: 0;
+}
+
 .role-actions {
+  justify-content: flex-start;
+}
+
+.attachment-actions {
   justify-content: flex-start;
 }
 

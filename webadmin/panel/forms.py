@@ -1,6 +1,7 @@
 
 from django import forms
 from django.conf import settings
+from django.core.files.uploadedfile import UploadedFile
 import requests
 import re
 
@@ -8,16 +9,50 @@ import re
 class MultiFileInput(forms.ClearableFileInput):
     allow_multiple_selected = True
 
+    def value_from_datadict(self, data, files, name):
+        if not files:
+            return []
+        if hasattr(files, "getlist"):
+            return files.getlist(name)
+        upload = files.get(name)
+        if upload is None:
+            return []
+        if isinstance(upload, (list, tuple)):
+            return list(upload)
+        return [upload]
+
+
+class MultiFileField(forms.FileField):
+    widget = MultiFileInput
+
+    def clean(self, data, initial=None):
+        if not data:
+            data = []
+        if isinstance(data, tuple):
+            data = list(data)
+        if not isinstance(data, list):
+            data = [data]
+        cleaned: list[UploadedFile] = []
+        errors: list[forms.ValidationError] = []
+        for item in data:
+            if item in self.empty_values:
+                continue
+            try:
+                cleaned.append(super().clean(item, initial))
+            except forms.ValidationError as exc:
+                errors.extend(exc.error_list)
+        if errors:
+            raise forms.ValidationError(errors)
+        if self.required and not cleaned:
+            raise forms.ValidationError(self.error_messages["required"])
+        return cleaned
+
 
 class RoleBroadcastForm(forms.Form):
     guild_id = forms.ChoiceField(label="サーバー", choices=())
     role_ids = forms.MultipleChoiceField(label="ロール", choices=(), required=False)
     message = forms.CharField(label="メッセージ", widget=forms.Textarea, required=False)
-    attachments = forms.FileField(
-        label="添付ファイル",
-        required=False,
-        widget=MultiFileInput(attrs={"multiple": True}),
-    )
+    attachments = MultiFileField(label="添付ファイル", required=False)
 
     # 8MB は Discord DM の添付制限
     MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
@@ -67,8 +102,8 @@ class RoleBroadcastForm(forms.Form):
             self.initial.setdefault("role_ids", [roles[0][0]])
 
     def clean_attachments(self):
-        files = self.files.getlist("attachments") if hasattr(self, "files") else []
-        cleaned = []
+        files = self.cleaned_data.get("attachments") or []
+        cleaned: list[UploadedFile] = []
         for f in files:
             if f is None:
                 continue

@@ -263,10 +263,28 @@
         {% endif %}
       </div>
 
-      <div class="form-field">
-        <label for="id_attachments">添付ファイル</label>
-        {{ form.attachments }}
-        <div class="helper-text">オプション：複数選択可能です。各ファイルのサイズにご注意ください。</div>
+      <div class="form-field" data-attachment-selector>
+        <label for="id_attachments_0">添付ファイル</label>
+        <div class="attachment-input-list" data-attachment-list data-attachment-max-size="{{ max_attachment_bytes }}">
+          <div class="attachment-input-item">
+            <div class="role-select-item">
+              <input
+                type="file"
+                name="attachments"
+                id="id_attachments_0"
+                class="attachment-input"
+                data-attachment-input
+                multiple
+              />
+              <button type="button" class="button-link button-ghost" data-remove-attachment aria-label="添付ファイルを削除">－</button>
+            </div>
+            <div class="helper-text attachment-file-note" data-attachment-name></div>
+          </div>
+        </div>
+        <div class="helper-text">オプション：＋ボタンでファイルを追加できます。各ファイルは8MB以下にしてください。</div>
+        <div class="actions attachment-actions">
+          <button type="button" class="button-link" data-add-attachment>＋ 添付ファイルを追加</button>
+        </div>
         {% if form.attachments.errors %}
         <ul class="error-list">
           {% for error in form.attachments.errors %}
@@ -290,6 +308,16 @@
           {% endfor %}
         </select>
         <button type="button" class="button-link button-ghost" data-remove-role aria-label="ロールを削除">－</button>
+      </div>
+    </template>
+
+    <template id="attachment-input-template">
+      <div class="attachment-input-item">
+        <div class="role-select-item">
+          <input type="file" name="attachments" class="attachment-input" data-attachment-input multiple>
+          <button type="button" class="button-link button-ghost" data-remove-attachment aria-label="添付ファイルを削除">－</button>
+        </div>
+        <div class="helper-text attachment-file-note" data-attachment-name></div>
       </div>
     </template>
 
@@ -384,6 +412,152 @@
           document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && !modalBackdrop.hidden) {
               closeModal();
+            }
+          });
+        }
+
+        const attachmentSelector = document.querySelector('[data-attachment-selector]');
+        const attachmentLabel = attachmentSelector ? attachmentSelector.querySelector('label') : null;
+        const attachmentListEl = document.querySelector('[data-attachment-list]');
+        const attachmentTemplate = document.getElementById('attachment-input-template');
+        const addAttachmentBtn = document.querySelector('[data-add-attachment]');
+        const maxFileSizeAttr = attachmentListEl ? Number(attachmentListEl.getAttribute('data-attachment-max-size')) : 0;
+        const MAX_ATTACHMENT_BYTES = Number.isFinite(maxFileSizeAttr) && maxFileSizeAttr > 0 ? maxFileSizeAttr : 8 * 1024 * 1024;
+        let attachmentCounter = 1;
+
+        const updateAttachmentLabel = () => {
+          if (!attachmentLabel || !attachmentListEl) {
+            return;
+          }
+          const firstInput = attachmentListEl.querySelector('[data-attachment-input]');
+          if (firstInput && firstInput.id) {
+            attachmentLabel.setAttribute('for', firstInput.id);
+          } else {
+            attachmentLabel.removeAttribute('for');
+          }
+        };
+
+        const formatFileSize = (bytes) => {
+          if (!Number.isFinite(bytes)) {
+            return '';
+          }
+          if (bytes >= 1024 * 1024) {
+            return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 1 : 2)} MB`;
+          }
+          if (bytes >= 1024) {
+            return `${(bytes / 1024).toFixed(1)} KB`;
+          }
+          return `${bytes} B`;
+        };
+
+        const updateAttachmentRemoveButtons = () => {
+          if (!attachmentListEl) {
+            return;
+          }
+          const buttons = attachmentListEl.querySelectorAll('[data-remove-attachment]');
+          buttons.forEach((btn) => {
+            btn.disabled = false;
+            btn.classList.remove('is-disabled');
+          });
+        };
+
+        const resetAttachment = (input, noteEl) => {
+          if (input) {
+            input.value = '';
+          }
+          if (noteEl) {
+            noteEl.textContent = '';
+          }
+        };
+
+        const handleAttachmentChange = (input, noteEl) => {
+          if (!input) {
+            return;
+          }
+          const files = input.files;
+          if (!files || files.length === 0) {
+            resetAttachment(input, noteEl);
+            return;
+          }
+          const selected = Array.from(files);
+          const oversize = selected.find((file) => file.size > MAX_ATTACHMENT_BYTES);
+          if (oversize) {
+            window.alert(`添付ファイルは8MB以下にしてください。\n対象: ${oversize.name}`);
+            resetAttachment(input, noteEl);
+            return;
+          }
+          if (noteEl) {
+            if (selected.length === 1) {
+              const file = selected[0];
+              noteEl.textContent = `${file.name} (${formatFileSize(file.size)})`;
+            } else {
+              const names = selected.map((file) => file.name);
+              const preview = names.slice(0, 3).join(', ');
+              const remainder = names.length > 3 ? `、他${names.length - 3}件` : '';
+              noteEl.textContent = `${names.length}ファイル選択: ${preview}${remainder}`;
+            }
+          }
+        };
+
+        const wireAttachmentItem = (item) => {
+          if (!item) {
+            return;
+          }
+          const input = item.querySelector('[data-attachment-input]');
+          const noteEl = item.querySelector('[data-attachment-name]');
+          if (input) {
+            input.setAttribute('multiple', 'multiple');
+            if (!input.id) {
+              input.id = `id_attachments_${attachmentCounter++}`;
+            }
+            input.addEventListener('change', () => {
+              handleAttachmentChange(input, noteEl);
+            });
+          }
+          updateAttachmentLabel();
+        };
+
+        const addAttachmentInput = () => {
+          if (!attachmentTemplate || !attachmentListEl) {
+            return;
+          }
+          const fragment = attachmentTemplate.content.cloneNode(true);
+          const item = fragment.querySelector('.attachment-input-item');
+          if (!item) {
+            return;
+          }
+          attachmentListEl.appendChild(item);
+          wireAttachmentItem(item);
+          updateAttachmentRemoveButtons();
+          updateAttachmentLabel();
+        };
+
+        if (attachmentListEl) {
+          Array.from(attachmentListEl.querySelectorAll('.attachment-input-item')).forEach((item) => {
+            wireAttachmentItem(item);
+          });
+          updateAttachmentRemoveButtons();
+          updateAttachmentLabel();
+        }
+
+        if (attachmentListEl && attachmentTemplate && addAttachmentBtn) {
+          addAttachmentBtn.addEventListener('click', () => {
+            addAttachmentInput();
+          });
+          attachmentListEl.addEventListener('click', (event) => {
+            const removeBtn = event.target.closest('[data-remove-attachment]');
+            if (removeBtn) {
+              const item = removeBtn.closest('.attachment-input-item');
+              if (item) {
+                item.remove();
+              }
+              updateAttachmentRemoveButtons();
+              updateAttachmentLabel();
+              return;
+            }
+            const addBtnInline = event.target.closest('[data-inline-add-attachment]');
+            if (addBtnInline) {
+              addAttachmentInput();
             }
           });
         }

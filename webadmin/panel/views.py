@@ -966,6 +966,7 @@ def broadcast(request: HttpRequest) -> HttpResponse:
             "form": form,
             "twitch_account": twitch_account,
             "recipient_popup": recipient_popup,
+            "max_attachment_bytes": RoleBroadcastForm.MAX_ATTACHMENT_BYTES,
         },
     )
 
