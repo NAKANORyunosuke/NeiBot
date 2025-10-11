@@ -2,7 +2,6 @@ import os
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA_DIR = os.path.join(PROJECT_ROOT, "venv")
-USERS_FILE = os.path.join(DATA_DIR, "all_users.json")
 DEBUG = os.getenv("DEBUG", "false").lower() in ("1", "true", "yes")
 
 

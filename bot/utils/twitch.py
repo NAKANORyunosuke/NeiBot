@@ -15,7 +15,6 @@ from bot.common import debug_print
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 TOKEN_PATH = os.path.join(PROJECT_ROOT, "venv", "token.json")
-USERS_FILE = os.path.join(PROJECT_ROOT, "venv", "all_users.json")
 
 API_BASE = "https://api.twitch.tv/helix"
 

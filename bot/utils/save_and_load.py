@@ -1,4 +1,5 @@
 from typing import Dict, Any, Optional, Tuple
+from collections.abc import Mapping
 import os
 import json
 import datetime as dt
@@ -7,12 +8,18 @@ import sqlite3
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 DATA_DIR = os.path.join(PROJECT_ROOT, "venv")
-USERS_FILE = os.path.join(DATA_DIR, "all_users.json")
+LEGACY_USERS_FILE = os.path.join(DATA_DIR, "all_users.json")
 TOKEN_FILE = os.path.join(DATA_DIR, "token.json")
 ROLE_FILE = os.path.join(DATA_DIR, "role_id.json")
 CHANNEL_FILE = os.path.join(DATA_DIR, "channel_id.json")
 CATEGORY_FILE = os.path.join(DATA_DIR, "category_id.json")
 ROLE_CONFIG_FILE = os.path.join(DATA_DIR, "subscription_config.json")
+GUILD_STATE_FILE = os.path.join(DATA_DIR, "guild_state.json")
+LEGACY_GUILD_STATE_FILES = {
+    "roles": ROLE_FILE,
+    "channels": CHANNEL_FILE,
+    "categories": CATEGORY_FILE,
+}
 DB_PATH = os.path.join(PROJECT_ROOT, "db.sqlite3")
 JST = dt.timezone(dt.timedelta(hours=9))
 
@@ -209,20 +216,61 @@ def save_file(data, FILE_NAME) -> None:
         json.dump(data, f, indent=4, ensure_ascii=False, default=str)
 
 
+def _coerce_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _load_guild_state() -> Dict[str, Any]:
+    data = load_file(GUILD_STATE_FILE)
+    if not isinstance(data, dict):
+        data = {}
+    migrated = False
+    for section, legacy_path in LEGACY_GUILD_STATE_FILES.items():
+        section_data = data.get(section)
+        if not isinstance(section_data, dict):
+            section_data = {}
+        if not section_data and os.path.exists(legacy_path):
+            legacy_data = load_file(legacy_path)
+            if isinstance(legacy_data, dict) and legacy_data:
+                section_data = legacy_data
+                migrated = True
+        data[section] = section_data
+    if migrated:
+        save_file(data, GUILD_STATE_FILE)
+    return data
+
+
+def _save_guild_state(guild_state: Dict[str, Any]) -> None:
+    payload: Dict[str, Any] = {}
+    for key, value in guild_state.items():
+        payload[key] = _coerce_mapping(value)
+    save_file(payload, GUILD_STATE_FILE)
+
+
 def load_role_ids() -> Dict[str, Any]:
-    return load_file(ROLE_FILE)
+    state = _load_guild_state()
+    roles = state.get("roles")
+    return _coerce_mapping(roles)
 
 
 def save_role_ids(data: Dict[str, Any]) -> None:
-    save_file(data, ROLE_FILE)
+    state = _load_guild_state()
+    state["roles"] = _coerce_mapping(data)
+    _save_guild_state(state)
 
 
 def load_channel_ids() -> Dict[str, Any]:
-    return load_file(CHANNEL_FILE)
+    state = _load_guild_state()
+    channels = state.get("channels")
+    return _coerce_mapping(channels)
 
 
 def save_channel_ids(data: Dict[str, Any]) -> None:
-    save_file(data, CHANNEL_FILE)
+    state = _load_guild_state()
+    state["channels"] = _coerce_mapping(data)
+    _save_guild_state(state)
 
 
 def load_subscription_config() -> Dict[str, Any]:
@@ -282,8 +330,8 @@ def _db_load_all_users() -> Dict[str, Any]:
         _db_init(conn)
         # migrate legacy file once
         try:
-            if _db_rowcount(conn) == 0 and os.path.exists(USERS_FILE):
-                legacy = load_file(USERS_FILE)
+            if _db_rowcount(conn) == 0 and os.path.exists(LEGACY_USERS_FILE):
+                legacy = load_file(LEGACY_USERS_FILE)
                 if isinstance(legacy, dict) and legacy:
                     _db_upsert_users(legacy)
         except Exception:
@@ -304,28 +352,31 @@ def _db_load_all_users() -> Dict[str, Any]:
 
 
 def load_users() -> Dict[str, Any]:
-    """Return all linked users from DB (migrates from JSON on first run)."""
+    """Return all linked users from DB (migrates from legacy JSON once if needed)."""
     try:
         return _db_load_all_users()
     except Exception:
-        return load_file(USERS_FILE)
+        return {}
 
 
 def save_linked_users(data: Dict[str, Any]) -> None:
-    """Persist entire users map to DB and sync legacy JSON as backup."""
+    """Persist entire users map to DB."""
     try:
         _db_upsert_users(data)
     except Exception:
         pass
-    save_file(data, USERS_FILE)
 
 
 def load_subscription_categories() -> Dict[str, Any]:
-    return load_file(CATEGORY_FILE)
+    state = _load_guild_state()
+    categories = state.get("categories")
+    return _coerce_mapping(categories)
 
 
 def save_subscription_categories(data: Dict[str, Any]) -> None:
-    save_file(data, CATEGORY_FILE)
+    state = _load_guild_state()
+    state["categories"] = _coerce_mapping(data)
+    _save_guild_state(state)
 
 
 def get_guild_id():
@@ -334,8 +385,8 @@ def get_guild_id():
     return GUILD_ID
 
 
-# all_users.jsonの定義 最初だけにする
-# 後々追加されるキーのためにDictとして保存しない
+# linked_users table helper
+# initialize missing entries when needed
 def save_linked_user(
     discord_id: str,
     twitch_username: str,
@@ -474,15 +525,11 @@ def save_all_guild_members(bot):
             except Exception:
                 pass
 
-    if dirty:
-        save_file(data, USERS_FILE)
-
-
 def get_taken_json():
     try:
         return _db_load_all_users()
     except Exception:
-        return load_file(USERS_FILE)
+        return {}
 
 
 def get_linked_user(discord_id: str) -> Dict[str, Any]:
@@ -490,8 +537,7 @@ def get_linked_user(discord_id: str) -> Dict[str, Any]:
         obj = _db_get_user(discord_id)
         return obj or {}
     except Exception:
-        data = load_file(USERS_FILE)
-        return (data or {}).get(str(discord_id), {}) if isinstance(data, dict) else {}
+        return {}
 
 
 def delete_linked_user(discord_id: str) -> None:
@@ -499,10 +545,6 @@ def delete_linked_user(discord_id: str) -> None:
         _db_delete_user(discord_id)
     except Exception:
         pass
-    data = load_file(USERS_FILE)
-    if isinstance(data, dict) and str(discord_id) in data:
-        data.pop(str(discord_id), None)
-        save_file(data, USERS_FILE)
 
 
 def ensure_user_entry(discord_id: str) -> None:
@@ -511,11 +553,6 @@ def ensure_user_entry(discord_id: str) -> None:
             _db_upsert_user(discord_id, {})
     except Exception:
         pass
-    data = load_file(USERS_FILE)
-    if not isinstance(data, dict):
-        data = {}
-    data.setdefault(str(discord_id), {})
-    save_file(data, USERS_FILE)
 
 
 def patch_linked_user(
@@ -536,11 +573,6 @@ def patch_linked_user(
         _db_upsert_user(did, current)
     except Exception:
         pass
-    file_data = load_file(USERS_FILE)
-    if not isinstance(file_data, dict):
-        file_data = {}
-    file_data[did] = current
-    save_file(file_data, USERS_FILE)
     return current
 
 

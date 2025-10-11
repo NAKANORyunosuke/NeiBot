@@ -28,7 +28,6 @@ from bot.common import debug_print
 # ========= 定数・パス =========
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA_DIR = os.path.join(PROJECT_ROOT, "venv")
-USERS_FILE = os.path.join(DATA_DIR, "all_users.json")
 JST = dt.timezone(dt.timedelta(hours=9))
 
 
