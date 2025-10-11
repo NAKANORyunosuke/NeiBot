@@ -457,6 +457,16 @@ def save_all_guild_members(bot):
             existing["discord_profile"] = profile_candidate
             changed = True
 
+        # 連携済みユーザーは resolved を自動的に維持
+        if existing.get("twitch_user_id"):
+            if not existing.get("resolved"):
+                existing["resolved"] = True
+                changed = True
+            if existing.get("roles_revoked"):
+                existing["roles_revoked"] = False
+                existing["roles_revoked_at"] = None
+                changed = True
+
         if changed:
             dirty = True
             try:

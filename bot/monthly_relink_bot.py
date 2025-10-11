@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import asyncio
 import datetime as dt
+from typing import Any, Optional, Dict
 
 import discord
 from discord.ext import commands
@@ -33,6 +34,27 @@ JST = dt.timezone(dt.timedelta(hours=9))
 
 def jst_now() -> dt.datetime:
     return dt.datetime.now(tz=JST)
+
+
+def _parse_iso_datetime(value: Any) -> Optional[dt.datetime]:
+    if not value:
+        return None
+    if isinstance(value, dt.datetime):
+        dt_value = value
+    elif isinstance(value, dt.date):
+        dt_value = dt.datetime.combine(value, dt.time.min)
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        text = text.replace("Z", "+00:00")
+        try:
+            dt_value = dt.datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if dt_value.tzinfo is None:
+        dt_value = dt_value.replace(tzinfo=JST)
+    return dt_value.astimezone(JST)
 
 
 def build_relink_message(discord_id: str) -> str:
@@ -143,30 +165,35 @@ class ReLinkCog(commands.Cog):
     async def notify_monthly_relink(self, *, force: bool = False) -> None:
         now = jst_now()
         if not force and now.day != 1:
-            debug_print("[monthly] 月初めではないためスキップ")
+            debug_print("[monthly] 月初ではないためスキップ")
             return
 
         sent = 0
         state = load_users()
-        # 値が辞書でない（誤って混入した）トップレベルキーを無視
         for discord_id, user in list(state.items()):
             if not isinstance(user, dict):
                 continue
+
+            if user.get("twitch_user_id"):
+                continue
+
+            if not force and user.get("resolved", False):
+                continue
+
             ok = await send_dm(
                 self.bot, int(discord_id), build_relink_message(discord_id)
             )
             if ok:
                 sent += 1
-                patch_linked_user(
-                    str(discord_id),
-                    {
-                        "first_notice_at": now.isoformat(),
-                        "last_notice_at": now.isoformat(),
-                        "resolved": False,
-                    },
-                )
-            await asyncio.sleep(1)  # レート制御（必要に応じて調整）
-        print(f"[monthly] 送信完了: {sent}件")
+                updates: Dict[str, Any] = {
+                    "last_notice_at": now.isoformat(),
+                    "resolved": False,
+                }
+                if not user.get("first_notice_at"):
+                    updates["first_notice_at"] = now.isoformat()
+                patch_linked_user(str(discord_id), updates)
+            await asyncio.sleep(1)
+        debug_print(f"[monthly] 送信完了: {sent}件")
 
     async def resend_after_7days_if_unlinked(self) -> None:
         now = jst_now()
@@ -174,41 +201,20 @@ class ReLinkCog(commands.Cog):
         role_map = load_role_ids() or {}
         resend_cnt = 0
 
-        # 値が辞書でない（誤って混入した）トップレベルキーを無視
         for discord_id, lu in list(users.items()):
             if not isinstance(lu, dict):
                 continue
             if lu.get("resolved", False):
                 continue
 
-            last_str = lu.get("last_notice_at", None)
-            if last_str is None:
+            if lu.get("twitch_user_id"):
                 continue
 
-            try:
-                last_at = dt.datetime.fromisoformat(last_str)
-                if last_at.tzinfo is None:
-                    last_at = last_at.replace(tzinfo=JST)
-            except Exception:
+            last_notice = _parse_iso_datetime(lu.get("last_notice_at"))
+            if last_notice is None:
                 continue
-            # 7日未満なら見送り
-            print(discord_id, lu)
-            if (now - last_at).days < 7:
+            if now - last_notice < dt.timedelta(days=7):
                 continue
-            print((now - last_at).days)
-            # 「当月に検証済み(last_verified_at)」なら解決扱い
-            if lu.get("last_verified_at", None):
-                try:
-                    last_ver = dt.datetime.fromisoformat(lu["last_verified_at"])
-                    if last_ver.tzinfo is None:
-                        last_ver = last_ver.replace(tzinfo=JST)
-                    if (last_ver.year == now.year) and (last_ver.month == now.month):
-                        lu["resolved"] = True
-                        continue
-                except Exception:
-                    pass
-            else:
-                lu["resolved"] = False
 
             revoked = await self._revoke_link_roles(discord_id, role_map=role_map)
             if revoked:
@@ -226,11 +232,9 @@ class ReLinkCog(commands.Cog):
                     str(discord_id),
                     {"last_notice_at": now.isoformat(), "resolved": False},
                 )
-
             await asyncio.sleep(0.5)
-        print(f"[resend] 再送完了: {resend_cnt}件")
+        debug_print(f"[resend] 再送完了: {resend_cnt}件")
 
-    # ===== イベントでスケジューラ起動 =====
     @commands.Cog.listener()
     async def on_ready(self):
 
