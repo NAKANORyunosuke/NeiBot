@@ -8,7 +8,6 @@ import sqlite3
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 DATA_DIR = os.path.join(PROJECT_ROOT, "venv")
-LEGACY_USERS_FILE = os.path.join(DATA_DIR, "all_users.json")
 TOKEN_FILE = os.path.join(DATA_DIR, "token.json")
 ROLE_FILE = os.path.join(DATA_DIR, "role_id.json")
 CHANNEL_FILE = os.path.join(DATA_DIR, "channel_id.json")
@@ -328,14 +327,6 @@ def _db_load_all_users() -> Dict[str, Any]:
     conn = _db_connect()
     try:
         _db_init(conn)
-        # migrate legacy file once
-        try:
-            if _db_rowcount(conn) == 0 and os.path.exists(LEGACY_USERS_FILE):
-                legacy = load_file(LEGACY_USERS_FILE)
-                if isinstance(legacy, dict) and legacy:
-                    _db_upsert_users(legacy)
-        except Exception:
-            pass
         cur = conn.execute(f"SELECT discord_id, data FROM {LINKED_USERS_TABLE}")
         res: Dict[str, Any] = {}
         for did, data_json in cur.fetchall():

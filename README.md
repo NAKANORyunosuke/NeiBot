@@ -29,7 +29,6 @@ NeiBot は Twitch のサブスクライバー状態を Discord サーバーへ�
   - `panel` アプリが `db.sqlite3` の `linked_users` / `webhook_events` を参照し、Web UI で運用操作を提供。
 - **ストレージ**
   - `db.sqlite3`: ボットと Django が共有。`linked_users`, `webhook_events`, `cheer_events`。
-  - `venv/all_users.json`: 旧形式のバックアップ。初回起動時に `linked_users` テーブルへ自動移行され、その後は更新されない。
   - 補助設定: `venv/token.json`, `role_id.json`, `channel_id.json`, `category_id.json`, `subscription_config.json`。
 
 ---
