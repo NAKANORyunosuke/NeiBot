@@ -1,10 +1,14 @@
 
+from collections import Counter
+
 from django import forms
 from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
 import requests
 import re
 import json
+
+from .models import LinkedUser
 
 
 class MultiFileInput(forms.ClearableFileInput):
@@ -49,12 +53,18 @@ class MultiFileField(forms.FileField):
         return cleaned
 
 
-class RoleBroadcastForm(forms.Form):
-    guild_id = forms.ChoiceField(label="サーバー", choices=())
-    role_ids = forms.MultipleChoiceField(label="ロール", choices=(), required=False)
-    message = forms.CharField(label="メッセージ", widget=forms.Textarea, required=False)
-    attachments = MultiFileField(label="添付ファイル", required=False)
-
+class RoleBroadcastForm(forms.Form):
+    guild_id = forms.ChoiceField(label="サーバー", choices=())
+    role_ids = forms.MultipleChoiceField(label="ロール", choices=(), required=False)
+    streak_filters = forms.MultipleChoiceField(
+        label="Streak月数フィルタ",
+        choices=(),
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+        help_text="指定した連続月数に一致するユーザーのみに送信します (未選択なら全員)。",
+    )
+    message = forms.CharField(label="メッセージ", widget=forms.Textarea, required=False)
+    attachments = MultiFileField(label="添付ファイル", required=False)
     # 8MB は Discord DM の添付制限
     MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
     ALLOWED_PLACEHOLDERS = {"user"}
@@ -101,6 +111,14 @@ class RoleBroadcastForm(forms.Form):
         self.fields["role_ids"].choices = roles
         if not self.is_bound and roles:
             self.initial.setdefault("role_ids", [roles[0][0]])
+        streak_choices = self._build_streak_choices()
+        streak_field = self.fields["streak_filters"]
+        streak_field.choices = streak_choices
+        if streak_choices:
+            streak_field.widget.attrs.pop("disabled", None)
+        else:
+            streak_field.widget.attrs["disabled"] = "disabled"
+            streak_field.help_text = "streak情報がまだないため現在は利用できません。"
 
     def clean_attachments(self):
         files = self.cleaned_data.get("attachments") or []
@@ -140,6 +158,43 @@ class RoleBroadcastForm(forms.Form):
             if v not in unique:
                 unique.append(v)
         return unique
+
+    def clean_streak_filters(self):
+        values = self.cleaned_data.get("streak_filters") or []
+        cleaned: list[int] = []
+        seen: set[int] = set()
+        for raw in values:
+            try:
+                num = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if num in seen:
+                continue
+            seen.add(num)
+            cleaned.append(num)
+        return cleaned
+
+    def _build_streak_choices(self) -> list[tuple[str, str]]:
+        counter: Counter[int] = Counter()
+        try:
+            streak_values = LinkedUser.objects.values_list(
+                "data__streak_months", flat=True
+            )
+            for value in streak_values:
+                try:
+                    num = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if num < 0:
+                    continue
+                counter[num] += 1
+        except Exception:
+            return []
+        choices: list[tuple[str, str]] = []
+        for months in sorted(counter):
+            label = f"{months}ヶ月 ({counter[months]}人)"
+            choices.append((str(months), label))
+        return choices
 
 
 class EventSubSubscriptionForm(forms.Form):

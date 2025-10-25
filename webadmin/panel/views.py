@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import datetime as dt
 from collections import Counter
@@ -869,9 +869,40 @@ def broadcast(request: HttpRequest) -> HttpResponse:
     if not request.user.is_staff:
         return HttpResponseForbidden("このページへアクセスする権限がありません。")
 
+    def _normalize_recipient_entry(entry: Dict[str, Any]) -> Dict[str, Any] | None:
+        if not isinstance(entry, dict):
+            return None
+        raw_id = entry.get("id")
+        if raw_id is None:
+            return None
+        user_id = str(raw_id)
+        display_name = str(entry.get("display_name") or "").strip()
+        username_value = entry.get("username") or entry.get("name")
+        username = str(username_value).strip() if username_value else ""
+        discriminator = entry.get("discriminator")
+        if discriminator in (None, "", "0", 0):
+            discriminator = None
+        label = display_name or username or user_id
+        tag = None
+        if username:
+            tag = username
+            if discriminator:
+                tag = f"{tag}#{discriminator}"
+        return {
+            "id": user_id,
+            "label": label,
+            "display_name": display_name or None,
+            "username": username or None,
+            "tag": tag,
+        }
+
     recipient_popup: Optional[Dict[str, Any]] = request.session.get(
         "last_role_dm_recipients"
     )
+    preview_results: List[Dict[str, Any]] = []
+    preview_requested = False
+    preview_limit = 200
+
     if request.method == "POST":
         request.session.pop("last_role_dm_recipients", None)
         recipient_popup = None
@@ -879,8 +910,10 @@ def broadcast(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = RoleBroadcastForm(request.POST, request.FILES)
         refresh_requested = bool(request.POST.get("refresh"))
+        preview_requested = bool(request.POST.get("preview"))
         if not refresh_requested and form.is_valid():
             role_ids = [int(r) for r in form.cleaned_data["role_ids"]]
+            streak_filters = list(form.cleaned_data.get("streak_filters") or [])
             guild_id_value = form.cleaned_data.get("guild_id")
             guild_id = int(guild_id_value) if guild_id_value else None
             message = form.cleaned_data["message"] or ""
@@ -929,12 +962,15 @@ def broadcast(request: HttpRequest) -> HttpResponse:
                 payload: Dict[str, Any] = {"role_id": rid, "message": message}
                 if guild_id:
                     payload["guild_id"] = guild_id
+                if streak_filters:
+                    payload["streak_filters"] = streak_filters
                 if attachments:
                     payload["attachments"] = attachments
-                    # Backward compatibility: keep first attachment fields
                     first = attachments[0]
                     payload.setdefault("file_url", first.get("url"))
                     payload.setdefault("file_path", first.get("path"))
+                if preview_requested:
+                    payload["preview_only"] = True
                 try:
                     resp = requests.post(
                         f"{settings.BOT_ADMIN_API_BASE}/send_role_dm",
@@ -950,39 +986,41 @@ def broadcast(request: HttpRequest) -> HttpResponse:
 
                 if resp.status_code == 200:
                     role_label = role_labels.get(str(rid), str(rid))
-                    success_roles.append(role_label)
-                    data: Dict[str, Any]
                     try:
-                        data = resp.json()
+                        data: Dict[str, Any] = resp.json()
                     except ValueError:
                         data = {}
                     recipients_payload = data.get("recipients") or []
+
+                    if preview_requested:
+                        normalized_preview = []
+                        for entry in recipients_payload:
+                            normalized_entry = _normalize_recipient_entry(entry)
+                            if normalized_entry:
+                                normalized_preview.append(normalized_entry)
+                        normalized_sorted = sorted(
+                            normalized_preview,
+                            key=lambda item: (item.get("label") or item.get("id") or "").casefold(),
+                        )
+                        preview_results.append(
+                            {
+                                "role": role_label,
+                                "guild_name": data.get("guild_name"),
+                                "count": len(normalized_sorted),
+                                "recipients": normalized_sorted[:preview_limit],
+                                "has_more": len(normalized_sorted) > preview_limit,
+                                "remaining": max(0, len(normalized_sorted) - preview_limit),
+                                "streak_filters": sorted(streak_filters),
+                            }
+                        )
+                        continue
+
+                    success_roles.append(role_label)
                     for entry in recipients_payload:
-                        if not isinstance(entry, dict):
+                        normalized = _normalize_recipient_entry(entry)
+                        if not normalized:
                             continue
-                        raw_id = entry.get("id")
-                        if raw_id is None:
-                            continue
-                        user_id = str(raw_id)
-                        display_name = str(entry.get("display_name") or "").strip()
-                        username_value = entry.get("username") or entry.get("name")
-                        username = str(username_value).strip() if username_value else ""
-                        discriminator = entry.get("discriminator")
-                        if discriminator in (None, "", "0", 0):
-                            discriminator = None
-                        label = display_name or username or user_id
-                        tag = None
-                        if username:
-                            tag = username
-                            if discriminator:
-                                tag = f"{tag}#{discriminator}"
-                        aggregated_recipients[user_id] = {
-                            "id": user_id,
-                            "label": label,
-                            "display_name": display_name or None,
-                            "username": username or None,
-                            "tag": tag,
-                        }
+                        aggregated_recipients[normalized["id"]] = normalized
                     if recipients_payload:
                         last_meta = {
                             "guild_name": data.get("guild_name"),
@@ -992,40 +1030,55 @@ def broadcast(request: HttpRequest) -> HttpResponse:
                     reason = f"{resp.status_code} {resp.text}".strip()
                     failed_roles.append((role_labels.get(str(rid), str(rid)), reason))
 
-            if aggregated_recipients:
-                sorted_recipients = sorted(
-                    aggregated_recipients.values(),
-                    key=lambda item: (item.get("label") or item.get("id") or "").casefold(),
-                )
-                recipient_popup = {
-                    "recipients": sorted_recipients,
-                    "count": len(sorted_recipients),
-                    "roles": success_roles,
-                    "generated_at": timezone.now().isoformat(),
-                }
-                if last_meta and last_meta.get("guild_name"):
-                    recipient_popup["guild_name"] = last_meta["guild_name"]
-                request.session["last_role_dm_recipients"] = recipient_popup
-                request.session.modified = True
+            if preview_requested:
+                total_preview = sum(item["count"] for item in preview_results)
+                if total_preview:
+                    messages.info(
+                        request, "対象メンバーを表示しました。送信前にご確認ください。"
+                    )
+                elif not failed_roles:
+                    messages.warning(
+                        request, "該当するメンバーが見つかりませんでした。"
+                    )
+            else:
+                if aggregated_recipients:
+                    sorted_recipients = sorted(
+                        aggregated_recipients.values(),
+                        key=lambda item: (item.get("label") or item.get("id") or "").casefold(),
+                    )
+                    recipient_popup = {
+                        "recipients": sorted_recipients,
+                        "count": len(sorted_recipients),
+                        "roles": success_roles,
+                        "generated_at": timezone.now().isoformat(),
+                    }
+                    if streak_filters:
+                        recipient_popup["streak_filters"] = [
+                            str(value) for value in sorted(streak_filters)
+                        ]
+                    if last_meta and last_meta.get("guild_name"):
+                        recipient_popup["guild_name"] = last_meta["guild_name"]
+                    request.session["last_role_dm_recipients"] = recipient_popup
+                    request.session.modified = True
 
-            if success_roles:
-                if len(success_roles) == 1:
-                    messages.success(
-                        request, f"「{success_roles[0]}」への送信をキューに投入しました。"
-                    )
-                else:
-                    joined = "、".join(success_roles)
-                    messages.success(
-                        request,
-                        f"{len(success_roles)}件のロール（{joined}）への送信をキューに投入しました。",
-                    )
+                if success_roles:
+                    if len(success_roles) == 1:
+                        messages.success(
+                            request, f"「{success_roles[0]}」への送信をキューに投入しました。"
+                        )
+                    else:
+                        joined = "、".join(success_roles)
+                        messages.success(
+                            request,
+                            f"{len(success_roles)}件のロール（{joined}）への送信をキューに投入しました。",
+                        )
+                if not failed_roles:
+                    return redirect("broadcast")
+
             for label, reason in failed_roles:
                 messages.error(
-                    request, f"ロール「{label}」への送信に失敗しました: {reason}"
+                    request, f"ロール「{label}」への処理に失敗しました: {reason}"
                 )
-
-            if not failed_roles:
-                return redirect("broadcast")
     else:
         form = RoleBroadcastForm()
 
@@ -1047,11 +1100,12 @@ def broadcast(request: HttpRequest) -> HttpResponse:
             "form": form,
             "twitch_account": twitch_account,
             "recipient_popup": recipient_popup,
+            "preview_results": preview_results,
+            "preview_requested": preview_requested,
+            "preview_limit": preview_limit,
             "max_attachment_bytes": RoleBroadcastForm.MAX_ATTACHMENT_BYTES,
         },
     )
-
-
 @login_required
 def eventsub_admin(request: HttpRequest) -> HttpResponse:
     if not request.user.is_staff:
@@ -1180,6 +1234,7 @@ def eventsub_admin(request: HttpRequest) -> HttpResponse:
         "default_callback": default_callback,
     }
     return render(request, "panel/eventsub.html", context)
+
 
 
 

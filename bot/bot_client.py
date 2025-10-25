@@ -438,6 +438,45 @@ async def _send_dm(
         debug_print(f"[DM] failed to {getattr(user, 'id', '?')}: {e!r}")
 
 
+def _coerce_int_list(value: Any) -> list[int]:
+    if value is None:
+        return []
+    source = value if isinstance(value, list) else [value]
+    result: list[int] = []
+    seen: set[int] = set()
+    for item in source:
+        try:
+            num = int(item)
+        except (TypeError, ValueError):
+            continue
+        if num in seen:
+            continue
+        seen.add(num)
+        result.append(num)
+    return result
+
+
+def _build_allowed_member_ids(streak_filters: list[int]) -> set[str]:
+    filters = {int(val) for val in streak_filters if isinstance(val, int)}
+    if not filters:
+        return set()
+    try:
+        users = load_users()
+    except Exception:
+        users = {}
+    allowed: set[str] = set()
+    for discord_id, payload in (users or {}).items():
+        if not isinstance(payload, dict):
+            continue
+        try:
+            streak_val = int(payload.get("streak_months"))
+        except (TypeError, ValueError):
+            continue
+        if streak_val in filters:
+            allowed.add(str(discord_id))
+    return allowed
+
+
 async def notify_role_members(
     role_id: int,
     message: str,
@@ -445,11 +484,15 @@ async def notify_role_members(
     file_url: str | None = None,
     file_path: str | None = None,
     guild_id: int | None = None,
+    allowed_member_ids: set[str] | frozenset[str] | None = None,
 ):
     await bot.wait_until_ready()
     attachments_count = len(attachments or [])
+    allowed_set: set[str] | None = None
+    if allowed_member_ids is not None:
+        allowed_set = {str(mid) for mid in allowed_member_ids}
     debug_print(
-        f"[/send_role_dm] begin notify_role_members role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} attachments={attachments_count} has_legacy_file={bool(file_url or file_path)}"
+        f"[/send_role_dm] begin notify_role_members role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} attachments={attachments_count} has_legacy_file={bool(file_url or file_path)} streak_filter={len(allowed_set) if allowed_set is not None else 'all'}"
     )
     guild: discord.Guild | None = None
     if guild_id is not None:
@@ -475,12 +518,20 @@ async def notify_role_members(
         debug_print(f"[DM] role {role_id} not found in {guild.name}")
         return
     members = list(role.members)
-    debug_print(
-        f"[DM] target guild={guild.id}({guild.name}) role={role.id}({role.name}) members={len(members)}"
-    )
+    targets: list[discord.Member] = []
     for m in members:
         if m.bot:
             continue
+        if allowed_set is not None and str(m.id) not in allowed_set:
+            continue
+        targets.append(m)
+    debug_print(
+        f"[DM] target guild={guild.id}({guild.name}) role={role.id}({role.name}) members={len(members)} filtered={len(targets)}"
+    )
+    if not targets:
+        debug_print("[DM] no matching members for streak filter; abort send")
+        return
+    for m in targets:
         # Per-user placeholder replacement (minimal): {user}
         try:
             dm_text = message
@@ -698,10 +749,16 @@ async def send_role_dm(
         attachments.append({"url": file_url, "path": file_path, "name": None})
         attachments_count = len(attachments)
 
+    streak_filters = _coerce_int_list(payload.get("streak_filters"))
+    allowed_member_ids: set[str] | None = None
+    if streak_filters:
+        allowed_member_ids = _build_allowed_member_ids(streak_filters)
+    preview_only = bool(payload.get("preview_only"))
+
     guild_id: int | None = int(guild_id_value) if guild_id_value else None
 
     debug_print(
-        f"[/send_role_dm] payload role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} attachments={attachments_count}"
+        f"[/send_role_dm] payload role_id={role_id} guild_id={guild_id} msg_len={(len(message or ''))} attachments={attachments_count} streak_filters={streak_filters or 'all'} preview_only={preview_only}"
     )
 
     await bot.wait_until_ready()
@@ -730,6 +787,8 @@ async def send_role_dm(
             for member in resolved_role.members:
                 if getattr(member, "bot", False):
                     continue
+                if allowed_member_ids is not None and str(member.id) not in allowed_member_ids:
+                    continue
                 display_name = (
                     getattr(member, "display_name", None)
                     or getattr(member, "nick", None)
@@ -752,29 +811,38 @@ async def send_role_dm(
     except Exception as exc:
         debug_print(f"[/send_role_dm] failed to resolve recipients: {exc!r}")
 
-    schedule_in_bot_loop(
-        notify_role_members(
-            role_id,
-            message,
-            attachments,
-            file_url,
-            file_path,
-            (
-                int(guild_id)
-                if guild_id is not None
-                else getattr(resolved_guild, "id", None)
-            ),
-        )
+    allowed_member_ids_frozen = (
+        frozenset(allowed_member_ids) if allowed_member_ids is not None else None
     )
-    debug_print("[/send_role_dm] queued notify task")
+
+    if not preview_only:
+        schedule_in_bot_loop(
+            notify_role_members(
+                role_id,
+                message,
+                attachments,
+                file_url,
+                file_path,
+                (
+                    int(guild_id)
+                    if guild_id is not None
+                    else getattr(resolved_guild, "id", None)
+                ),
+                allowed_member_ids=allowed_member_ids_frozen,
+            )
+        )
+        debug_print("[/send_role_dm] queued notify task")
+    else:
+        debug_print("[/send_role_dm] preview_only=True -> skip notify task")
     return {
-        "status": "queued",
+        "status": "preview" if preview_only else "queued",
         "recipients": recipients,
         "recipient_count": len(recipients),
         "guild_id": getattr(resolved_guild, "id", None),
         "guild_name": getattr(resolved_guild, "name", None),
         "role_id": role_id,
         "role_name": getattr(resolved_role, "name", None),
+        "preview_only": preview_only,
     }
 
 
