@@ -4,6 +4,7 @@ import datetime as dt
 from collections import Counter
 import csv
 import io
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -97,6 +98,42 @@ def _to_local(dt_value: Optional[dt.datetime]) -> Optional[dt.datetime]:
     if timezone.is_naive(dt_value):
         dt_value = timezone.make_aware(dt_value, timezone.get_default_timezone())
     return timezone.localtime(dt_value)
+
+
+def _extract_twitch_username(payload: Any) -> Optional[str]:
+    raw = payload
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(raw, dict):
+        return None
+
+    candidate_dicts: List[Dict[str, Any]] = [raw]
+    event_obj = raw.get("event")
+    if isinstance(event_obj, dict):
+        candidate_dicts.append(event_obj)
+
+    candidate_keys = [
+        "user_login",
+        "user_name",
+        "broadcaster_user_login",
+        "broadcaster_user_name",
+        "from_broadcaster_user_login",
+        "from_broadcaster_user_name",
+        "to_broadcaster_user_login",
+        "to_broadcaster_user_name",
+    ]
+
+    for mapping in candidate_dicts:
+        for key in candidate_keys:
+            value = mapping.get(key)
+            if value:
+                return str(value)
+    return None
 
 
 def _build_dashboard_context() -> Dict[str, Any]:
@@ -319,6 +356,8 @@ def _build_dashboard_context() -> Dict[str, Any]:
             status_label = str(event.status or "不明")
             status_level = "muted"
 
+        twitch_username = _extract_twitch_username(event.payload)
+
         if len(recent_events) < 12:
             recent_events.append(
                 {
@@ -328,6 +367,7 @@ def _build_dashboard_context() -> Dict[str, Any]:
                     "status": status_label,
                     "status_level": status_level,
                     "twitch_user_id": event.twitch_user_id,
+                     "twitch_username": twitch_username,
                     "received_at": local_received,
                     "retries": event.retries,
                     "error": event.error,
