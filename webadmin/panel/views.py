@@ -146,6 +146,31 @@ def _build_dashboard_context() -> Dict[str, Any]:
     except Exception:
         linked_users = []
 
+    twitch_to_discord: Dict[str, Dict[str, Optional[str]]] = {}
+    for linked in linked_users:
+        data = linked.data or {}
+        twitch_id = data.get("twitch_user_id") or data.get("twitch_id")
+        if not twitch_id:
+            continue
+        profile = data.get("discord_profile") or {}
+        label = (
+            data.get("discord_display_name")
+            or profile.get("display_name")
+            or data.get("discord_username")
+            or profile.get("username")
+        )
+        username = profile.get("username") or data.get("discord_username")
+        discriminator = profile.get("discriminator") or data.get("discord_discriminator")
+        tag = None
+        if username:
+            tag = username
+            disc_str = str(discriminator or "").strip()
+            if disc_str and disc_str not in {"0", "0000"}:
+                tag = f"{tag}#{disc_str}"
+        if not label:
+            label = username or profile.get("global_name") or linked.discord_id
+        twitch_to_discord[str(twitch_id)] = {"label": label, "tag": tag}
+
     user_stats: Dict[str, Any] = {
         "total": 0,
         "active": 0,
@@ -359,6 +384,12 @@ def _build_dashboard_context() -> Dict[str, Any]:
         twitch_username = _extract_twitch_username(event.payload)
 
         if len(recent_events) < 12:
+            discord_info = twitch_to_discord.get(str(event.twitch_user_id))
+            discord_label = None
+            discord_tag = None
+            if discord_info:
+                discord_label = discord_info.get("label")
+                discord_tag = discord_info.get("tag")
             recent_events.append(
                 {
                     "delivery_id": event.delivery_id,
@@ -367,7 +398,9 @@ def _build_dashboard_context() -> Dict[str, Any]:
                     "status": status_label,
                     "status_level": status_level,
                     "twitch_user_id": event.twitch_user_id,
-                     "twitch_username": twitch_username,
+                    "twitch_username": twitch_username,
+                    "discord_label": discord_label,
+                    "discord_tag": discord_tag,
                     "received_at": local_received,
                     "retries": event.retries,
                     "error": event.error,
