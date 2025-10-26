@@ -136,6 +136,35 @@ def _extract_twitch_username(payload: Any) -> Optional[str]:
     return None
 
 
+def _extract_twitch_user_id(payload: Any) -> Optional[str]:
+    raw = payload
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(raw, dict):
+        return None
+    candidate_dicts: List[Dict[str, Any]] = [raw]
+    event_obj = raw.get("event")
+    if isinstance(event_obj, dict):
+        candidate_dicts.append(event_obj)
+    candidate_keys = [
+        "user_id",
+        "broadcaster_user_id",
+        "from_broadcaster_user_id",
+        "to_broadcaster_user_id",
+    ]
+    for mapping in candidate_dicts:
+        for key in candidate_keys:
+            value = mapping.get(key)
+            if value:
+                return str(value)
+    return None
+
+
 def _build_dashboard_context() -> Dict[str, Any]:
     now = timezone.now()
     today = timezone.localdate()
@@ -147,11 +176,11 @@ def _build_dashboard_context() -> Dict[str, Any]:
         linked_users = []
 
     twitch_to_discord: Dict[str, Dict[str, Optional[str]]] = {}
+    twitch_login_to_discord: Dict[str, Dict[str, Optional[str]]] = {}
     for linked in linked_users:
         data = linked.data or {}
         twitch_id = data.get("twitch_user_id") or data.get("twitch_id")
-        if not twitch_id:
-            continue
+        twitch_login = data.get("twitch_username") or data.get("twitch_login")
         profile = data.get("discord_profile") or {}
         label = (
             data.get("discord_display_name")
@@ -168,8 +197,17 @@ def _build_dashboard_context() -> Dict[str, Any]:
             if disc_str and disc_str not in {"0", "0000"}:
                 tag = f"{tag}#{disc_str}"
         if not label:
-            label = username or profile.get("global_name") or linked.discord_id
-        twitch_to_discord[str(twitch_id)] = {"label": label, "tag": tag}
+            label = (
+                profile.get("global_name")
+                or username
+                or linked.data.get("discord_global_name")
+                or linked.discord_id
+            )
+        mapping_value = {"label": label, "tag": tag}
+        if twitch_id:
+            twitch_to_discord[str(twitch_id)] = mapping_value
+        if twitch_login:
+            twitch_login_to_discord[str(twitch_login).lower()] = mapping_value
 
     user_stats: Dict[str, Any] = {
         "total": 0,
@@ -382,9 +420,15 @@ def _build_dashboard_context() -> Dict[str, Any]:
             status_level = "muted"
 
         twitch_username = _extract_twitch_username(event.payload)
+        payload_user_id = _extract_twitch_user_id(event.payload)
+        resolved_twitch_id = event.twitch_user_id or payload_user_id
 
         if len(recent_events) < 12:
-            discord_info = twitch_to_discord.get(str(event.twitch_user_id))
+            discord_info = None
+            if resolved_twitch_id:
+                discord_info = twitch_to_discord.get(str(resolved_twitch_id))
+            if not discord_info and twitch_username:
+                discord_info = twitch_login_to_discord.get(str(twitch_username).lower())
             discord_label = None
             discord_tag = None
             if discord_info:
@@ -397,7 +441,7 @@ def _build_dashboard_context() -> Dict[str, Any]:
                     "source": event.source,
                     "status": status_label,
                     "status_level": status_level,
-                    "twitch_user_id": event.twitch_user_id,
+                    "twitch_user_id": resolved_twitch_id,
                     "twitch_username": twitch_username,
                     "discord_label": discord_label,
                     "discord_tag": discord_tag,
