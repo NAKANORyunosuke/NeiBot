@@ -1136,7 +1136,12 @@ async def twitch_eventsub(
 
 # ===== FastAPI を別スレッドで起動 =====
 def start_api():
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    host = os.getenv("FASTAPI_HOST", "127.0.0.1")
+    try:
+        port = int(os.getenv("FASTAPI_PORT", "8000"))
+    except ValueError:
+        port = 8000
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 # ===== Discord Bot を起動 =====
